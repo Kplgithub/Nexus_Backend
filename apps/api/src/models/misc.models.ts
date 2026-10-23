@@ -1,5 +1,13 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
-import { ADMIN_ROLES, ENQUIRY_STATUSES, ENQUIRY_TYPES, FAQ_CATEGORIES } from '@nexus/shared';
+import {
+  ADMIN_ROLES,
+  ENQUIRY_STATUSES,
+  ENQUIRY_TYPES,
+  FAQ_CATEGORIES,
+  LANDMARK_KINDS,
+  REPORT_REASONS,
+  REPORT_STATUSES,
+} from '@nexus/shared';
 
 /* ---------------- Admin ---------------- */
 const adminSchema = new Schema(
@@ -46,6 +54,9 @@ const enquirySchema = new Schema(
       title: String,
       slug: String,
     },
+    /** Enquiries from a new-project page go to the builder. */
+    project: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
+    projectSnapshot: { name: String, slug: String },
     sourcePage: { type: String, maxlength: 300, default: null },
     preferredContactTime: { type: String, maxlength: 60, default: null },
     status: { type: String, enum: ENQUIRY_STATUSES, default: 'new' },
@@ -73,9 +84,16 @@ enquirySchema.index({ followUpAt: 1, status: 1 });
 enquirySchema.index({ phone: 1, createdAt: -1 });
 enquirySchema.index({ listingOwner: 1, createdAt: -1 });
 enquirySchema.index({ user: 1, createdAt: -1 });
+enquirySchema.index({ project: 1, createdAt: -1 });
 export const Enquiry = model('Enquiry', enquirySchema);
 
 /* ---------------- Locations ---------------- */
+/** Plain lat/lng pair (not GeoJSON); used for map centres and landmarks. */
+const pointSchema = new Schema(
+  { lat: { type: Number, required: true }, lng: { type: Number, required: true } },
+  { _id: false },
+);
+
 const localitySchema = new Schema(
   {
     name: { type: String, required: true, maxlength: 80 },
@@ -84,6 +102,21 @@ const localitySchema = new Schema(
     intro: { type: String, default: '', maxlength: 3000 },
     seoTitle: { type: String, maxlength: 70 },
     seoDescription: { type: String, maxlength: 170 },
+    center: { type: pointSchema, default: null },
+    highlights: { type: [String], default: [] },
+    landmarks: {
+      type: [
+        new Schema(
+          {
+            name: { type: String, required: true, maxlength: 80 },
+            kind: { type: String, enum: LANDMARK_KINDS, required: true },
+            location: { type: pointSchema, default: null },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
   },
   { _id: false },
 );
@@ -163,3 +196,23 @@ export const AuditLog = model('AuditLog', auditSchema);
 /* ---------------- Counters (for human-readable lead IDs) ---------------- */
 const counterSchema = new Schema({ _id: { type: String }, seq: { type: Number, default: 0 } });
 export const Counter = model('Counter', counterSchema);
+
+/* ---------------- Listing reports ---------------- */
+const reportSchema = new Schema(
+  {
+    property: { type: Schema.Types.ObjectId, ref: 'Property', required: true },
+    propertySnapshot: { title: String, slug: String },
+    reason: { type: String, enum: REPORT_REASONS, required: true },
+    details: { type: String, default: '', maxlength: 1000 },
+    status: { type: String, enum: REPORT_STATUSES, default: 'open' },
+    user: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    reporterName: { type: String, maxlength: 80, default: null },
+    ipHash: { type: String, maxlength: 64 },
+    note: { type: String, maxlength: 1000, default: null },
+    resolvedBy: { type: String, default: null },
+  },
+  { timestamps: true },
+);
+reportSchema.index({ status: 1, createdAt: -1 });
+reportSchema.index({ property: 1, ipHash: 1, createdAt: -1 });
+export const Report = model('Report', reportSchema);

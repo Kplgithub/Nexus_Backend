@@ -1,6 +1,14 @@
-import { slugify, type City as CityDto } from '@nexus/shared';
+import {
+  median,
+  slugify,
+  type City as CityDto,
+  type LandmarkKind,
+  type LocalityInsights,
+  type PropertyType,
+} from '@nexus/shared';
 import { City } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
+import { Project } from '../models/project.model.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import type { z } from 'zod';
 import type { cityCreateSchema, cityUpdateSchema } from '@nexus/shared';
@@ -22,8 +30,17 @@ type CityLean = {
     intro: string;
     seoTitle?: string | null;
     seoDescription?: string | null;
+    center?: { lat: number; lng: number } | null;
+    highlights?: string[];
+    landmarks?: {
+      name: string;
+      kind: string;
+      location?: { lat: number; lng: number } | null;
+    }[];
   }[];
 };
+
+const point = (p?: { lat: number; lng: number } | null) => (p ? { lat: p.lat, lng: p.lng } : null);
 
 function toDto(c: CityLean, counts?: Map<string, number>): CityDto {
   return {
@@ -45,6 +62,13 @@ function toDto(c: CityLean, counts?: Map<string, number>): CityDto {
       seoTitle: l.seoTitle ?? undefined,
       seoDescription: l.seoDescription ?? undefined,
       publishedCount: counts?.get(`${c.slug}/${l.slug}`) ?? undefined,
+      center: point(l.center),
+      highlights: l.highlights ?? [],
+      landmarks: (l.landmarks ?? []).map((m) => ({
+        name: m.name,
+        kind: m.kind as LandmarkKind,
+        location: point(m.location),
+      })),
     })),
   };
 }
@@ -150,7 +174,9 @@ export async function updateCity(id: string, patch: z.output<typeof cityUpdateSc
   const city = await City.findById(id);
   if (!city) throw notFound('City not found');
   if (patch.slug && patch.slug !== city.slug) {
-    const inUse = await Property.exists({ citySlug: city.slug });
+    const inUse =
+      (await Property.exists({ citySlug: city.slug })) ||
+      (await Project.exists({ citySlug: city.slug }));
     if (inUse) throw conflict('Cannot change the slug of a city that has listings');
   }
   if (patch.localities) {
@@ -159,7 +185,9 @@ export async function updateCity(id: string, patch: z.output<typeof cityUpdateSc
       .map((l) => l.slug)
       .filter((s) => !next.some((n) => n.slug === s));
     if (removed.length) {
-      const inUse = await Property.exists({ citySlug: city.slug, localitySlug: { $in: removed } });
+      const inUse =
+        (await Property.exists({ citySlug: city.slug, localitySlug: { $in: removed } })) ||
+        (await Project.exists({ citySlug: city.slug, localitySlug: { $in: removed } }));
       if (inUse)
         throw conflict('A locality you removed still has listings. Deactivate it instead.');
     }
@@ -172,8 +200,16 @@ export async function updateCity(id: string, patch: z.output<typeof cityUpdateSc
     { citySlug: city.slug },
     { $set: { cityName: city.name, state: city.state } },
   );
+  await Project.updateMany(
+    { citySlug: city.slug },
+    { $set: { cityName: city.name, state: city.state } },
+  );
   for (const l of city.localities) {
     await Property.updateMany(
+      { citySlug: city.slug, localitySlug: l.slug },
+      { $set: { localityName: l.name } },
+    );
+    await Project.updateMany(
       { citySlug: city.slug, localitySlug: l.slug },
       { $set: { localityName: l.name } },
     );
@@ -184,8 +220,84 @@ export async function updateCity(id: string, patch: z.output<typeof cityUpdateSc
 export async function deleteCity(id: string) {
   const city = await City.findById(id);
   if (!city) throw notFound('City not found');
-  if (await Property.exists({ citySlug: city.slug })) {
+  if (
+    (await Property.exists({ citySlug: city.slug })) ||
+    (await Project.exists({ citySlug: city.slug }))
+  ) {
     throw conflict('This city has listings. Deactivate it instead of deleting.');
   }
   await city.deleteOne();
+}
+
+const LIVE = { status: 'published', listingVisibility: 'public' } as const;
+
+/** Rates and counts for a locality page, from live listings (demo listings count until removed). */
+export async function getLocalityInsights(
+  citySlug: string,
+  localitySlug: string,
+): Promise<LocalityInsights> {
+  const city = await getPublicCity(citySlug);
+  const locality = city.localities.find((l) => l.slug === localitySlug);
+  if (!locality) throw notFound('Locality not found');
+
+  type Row = {
+    listingType: string;
+    price: number;
+    areaSqft: number;
+    bedrooms: number | null;
+    propertyType: string;
+    category: string;
+  };
+  const [rows, cityRows, projects] = await Promise.all([
+    Property.find({ ...LIVE, citySlug, localitySlug })
+      .select('listingType price areaSqft bedrooms propertyType category')
+      .limit(5000)
+      .lean<Row[]>(),
+    Property.find({ ...LIVE, citySlug, listingType: 'sale', category: 'residential' })
+      .select('price areaSqft propertyType')
+      .limit(20000)
+      .lean<Row[]>(),
+    Project.countDocuments({ status: 'published', citySlug, localitySlug }),
+  ]);
+
+  // Plots are priced per area very differently from built homes; keep them out of the rate.
+  const ppsf = (list: Row[]) =>
+    list
+      .filter((r) => r.areaSqft > 0 && r.propertyType !== 'plot')
+      .map((r) => Math.round(r.price / r.areaSqft));
+  const sale = rows.filter((r) => r.listingType === 'sale');
+  const rent = rows.filter((r) => r.listingType === 'rent');
+  const homeRent = rent.filter((r) => r.category === 'residential' && r.propertyType !== 'pg');
+
+  const byBhk = new Map<number, number[]>();
+  for (const r of homeRent) {
+    if (r.bedrooms === null || r.bedrooms === undefined) continue;
+    const k = Math.min(r.bedrooms, 4);
+    byBhk.set(k, [...(byBhk.get(k) ?? []), r.price]);
+  }
+  const typeCounts = new Map<string, number>();
+  for (const r of rows) typeCounts.set(r.propertyType, (typeCounts.get(r.propertyType) ?? 0) + 1);
+
+  return {
+    city: { slug: city.slug, name: city.name },
+    locality,
+    sale: {
+      count: sale.length,
+      medianPricePerSqft: median(ppsf(sale.filter((r) => r.category === 'residential'))),
+      minPrice: sale.length ? Math.min(...sale.map((r) => r.price)) : null,
+      maxPrice: sale.length ? Math.max(...sale.map((r) => r.price)) : null,
+    },
+    rent: {
+      count: rent.length,
+      medianRent: median(homeRent.map((r) => r.price)),
+      medianRentByBhk: [...byBhk.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([bedrooms, prices]) => ({ bedrooms, rent: median(prices)! })),
+    },
+    byType: [...typeCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([propertyType, count]) => ({ propertyType: propertyType as PropertyType, count })),
+    projects,
+    cityMedianPricePerSqft: median(ppsf(cityRows)),
+  };
 }

@@ -29,6 +29,13 @@ const userSchema = new Schema(
     reraNumber: { type: String, maxlength: 60, default: null },
     about: { type: String, maxlength: 1000, default: null },
     citySlug: { type: String, maxlength: 100, default: null },
+    experienceYears: { type: Number, min: 0, max: 80, default: null },
+    website: { type: String, maxlength: 200, default: null },
+    logoUrl: { type: String, maxlength: 1000, default: null },
+    /** Locality slugs (in citySlug) an agent works in or a builder builds in. */
+    localities: { type: [String], default: [] },
+    /** Public profile URL part for agents and builders, e.g. "shree-ram-realty". */
+    profileSlug: { type: String, lowercase: true, maxlength: 100, default: undefined },
 
     /** Let signed-in visitors reveal this number on the user's listings. */
     showPhone: { type: Boolean, default: true },
@@ -58,6 +65,7 @@ const userSchema = new Schema(
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1, status: 1, createdAt: -1 });
+userSchema.index({ profileSlug: 1 }, { unique: true, sparse: true });
 
 export type UserAttrs = InferSchemaType<typeof userSchema>;
 export type UserDoc = HydratedDocument<UserAttrs>;

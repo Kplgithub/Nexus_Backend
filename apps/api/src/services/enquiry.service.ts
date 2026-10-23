@@ -13,6 +13,7 @@ import {
 } from '@nexus/shared';
 import { Enquiry } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
+import { Project } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
 import { otpEnabled, env } from '../config/env.js';
 import { AppError, badRequest, forbidden, notFound } from '../lib/errors.js';
@@ -42,6 +43,8 @@ type EnquiryLean = {
   message: string;
   property?: Types.ObjectId | null;
   propertySnapshot?: { title?: string | null; slug?: string | null } | null;
+  project?: Types.ObjectId | null;
+  projectSnapshot?: { name?: string | null; slug?: string | null } | null;
   sourcePage?: string | null;
   preferredContactTime?: string | null;
   status: EnquiryDto['status'];
@@ -71,6 +74,11 @@ const propertyRef = (e: EnquiryLean) =>
       }
     : null;
 
+const projectRef = (e: EnquiryLean) =>
+  e.project && e.projectSnapshot?.slug
+    ? { id: String(e.project), name: e.projectSnapshot.name ?? '', slug: e.projectSnapshot.slug }
+    : null;
+
 function toDto(e: EnquiryLean): EnquiryDto {
   return {
     id: String(e._id),
@@ -88,6 +96,7 @@ function toDto(e: EnquiryLean): EnquiryDto {
             slug: e.propertySnapshot.slug,
           }
         : null,
+    project: projectRef(e),
     sourcePage: e.sourcePage ?? null,
     preferredContactTime: e.preferredContactTime ?? null,
     status: e.status,
@@ -150,7 +159,15 @@ export async function createEnquiry(
       .select('title slug postedBy')
       .lean<EnquiryProperty>();
   }
-  if (user && property?.postedBy && String(property.postedBy) === user.id) {
+  let project: { _id: Types.ObjectId; name: string; slug: string; builder: Types.ObjectId } | null =
+    null;
+  if (!property && input.projectId) {
+    project = await Project.findOne({ _id: input.projectId, status: 'published' })
+      .select('name slug builder')
+      .lean();
+  }
+  const owner = property?.postedBy ?? project?.builder ?? null;
+  if (user && owner && String(owner) === user.id) {
     throw badRequest('This is your own listing');
   }
 
@@ -158,6 +175,7 @@ export async function createEnquiry(
   const recent = await Enquiry.findOne({
     phone,
     property: property?._id ?? null,
+    project: project?._id ?? null,
     createdAt: { $gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
   })
     .select('leadId')
@@ -168,13 +186,15 @@ export async function createEnquiry(
   const leadId = await nextLeadId('E');
   await Enquiry.create({
     leadId,
-    type: property ? 'property' : input.type,
+    type: property || project ? 'property' : input.type,
     name: input.name,
     phone,
     email: input.email ?? null,
     message: input.message,
     property: property?._id ?? null,
     propertySnapshot: property ? { title: property.title, slug: property.slug } : undefined,
+    project: project?._id ?? null,
+    projectSnapshot: project ? { name: project.name, slug: project.slug } : undefined,
     sourcePage: input.sourcePage ?? null,
     preferredContactTime: input.preferredContactTime ?? null,
     status: spam ? 'spam' : 'new',
@@ -184,19 +204,29 @@ export async function createEnquiry(
     ipHash: meta.ipHash,
     userAgent: meta.userAgent?.slice(0, 300),
     user: user?.id ?? null,
-    listingOwner: property?.postedBy ?? null,
+    listingOwner: owner,
   });
 
   if (!spam && property?.postedBy) {
     void notifyListingOwner(property, input.name, phone, input.message);
   }
+  if (!spam && project) {
+    void notifyListingOwner(
+      { _id: project._id, title: project.name, slug: project.slug, postedBy: project.builder },
+      input.name,
+      phone,
+      input.message,
+    );
+  }
+  const about = property?.title ?? project?.name;
   if (!spam) {
-    void notifyNewLead(`New enquiry ${leadId}${property ? ` — ${property.title}` : ''}`, {
+    void notifyNewLead(`New enquiry ${leadId}${about ? ` — ${about}` : ''}`, {
       'Lead ID': leadId,
       Name: input.name,
       Phone: phone,
       Email: input.email,
       Property: property?.title,
+      Project: project?.name,
       Message: input.message,
       'Preferred time': input.preferredContactTime,
     });
@@ -259,6 +289,7 @@ function enquiryFilter(q: z.output<typeof adminEnquiryQuerySchema>): FilterQuery
       { email: rx },
       { leadId: rx },
       { 'propertySnapshot.title': rx },
+      { 'projectSnapshot.name': rx },
     ];
   }
   return f;
@@ -352,6 +383,7 @@ export async function listLeadsForOwner(userId: string, page = 1, limit = 20, un
     email: e.email ?? null,
     message: e.message,
     property: propertyRef(e),
+    project: projectRef(e),
     createdAt: e.createdAt.toISOString(),
     seen: Boolean(e.seenByOwner),
   }));
@@ -385,6 +417,7 @@ export async function listSentEnquiries(userId: string, page = 1, limit = 20) {
     type: e.type,
     message: e.message,
     property: propertyRef(e),
+    project: projectRef(e),
     createdAt: e.createdAt.toISOString(),
   }));
   return { items, meta: paginate(page, limit, total) };

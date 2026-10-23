@@ -5,6 +5,7 @@
 import { Property } from '../models/property.model.js';
 import { Enquiry, SlugRedirect } from '../models/misc.models.js';
 import { User } from '../models/user.model.js';
+import { Project } from '../models/project.model.js';
 import { runScript } from './run.js';
 
 await runScript('demo:remove', async () => {
@@ -16,9 +17,17 @@ await runScript('demo:remove', async () => {
   await SlugRedirect.deleteMany({ property: { $in: ids } });
   const props = await Property.deleteMany({ _id: { $in: ids } });
   await User.updateMany({}, { $pull: { saved: { $in: ids } } });
+  const projectIds = (
+    await Project.find({ $or: [{ isDemo: true }, { builder: { $in: userIds } }] })
+      .select('_id')
+      .lean()
+  ).map((p) => p._id);
+  await Enquiry.deleteMany({ project: { $in: projectIds } });
+  await Property.updateMany({ projectId: { $in: projectIds } }, { $set: { projectId: null } });
+  const projects = await Project.deleteMany({ _id: { $in: projectIds } });
   const users = await User.deleteMany({ _id: { $in: userIds } });
   console.warn(
-    `Removed ${props.deletedCount} demo listings, ${users.deletedCount} demo accounts and ${enq.deletedCount} related enquiries.`,
+    `Removed ${props.deletedCount} demo listings, ${projects.deletedCount} demo projects, ${users.deletedCount} demo accounts and ${enq.deletedCount} related enquiries.`,
   );
   const leftover = await Property.countDocuments({ 'images.isDemo': true });
   if (leftover)

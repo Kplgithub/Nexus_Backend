@@ -25,6 +25,7 @@ import {
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
 import { Property, type PropertyAttrs } from '../models/property.model.js';
+import { Project } from '../models/project.model.js';
 import { Enquiry, SlugRedirect } from '../models/misc.models.js';
 import { User } from '../models/user.model.js';
 import {
@@ -53,7 +54,30 @@ type PosterUser = {
   email?: string;
   phone?: string;
   createdAt?: Date;
+  profileSlug?: string | null;
 };
+
+/** /agents/<slug> or /builders/<slug>; null for owners and users without a slug. */
+export function profilePathFor(role: string, slug?: string | null): string | null {
+  if (!slug) return null;
+  if (role === 'agent') return `/agents/${slug}`;
+  if (role === 'builder') return `/builders/${slug}`;
+  return null;
+}
+
+type GeoField = { type?: string | null; coordinates?: number[] | null } | null | undefined;
+
+/** GeoJSON stores [lng, lat]; the API speaks { lat, lng }. */
+export function fromGeo(g: GeoField) {
+  const c = g?.coordinates;
+  return c && c.length === 2 ? { lat: c[1]!, lng: c[0]! } : null;
+}
+
+export function toGeo(p: { lat: number; lng: number } | null | undefined) {
+  return p ? { type: 'Point', coordinates: [p.lng, p.lat] } : undefined;
+}
+
+const PLOT_TYPES = ['plot', 'industrial-land'];
 
 const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
@@ -67,6 +91,7 @@ const NEXUS_POSTER: ListingPoster = {
   verified: true,
   canRevealPhone: false,
   memberSince: null,
+  profilePath: null,
 };
 
 function posterFrom(p: Lean, u: PosterUser | null | undefined): ListingPoster {
@@ -79,6 +104,7 @@ function posterFrom(p: Lean, u: PosterUser | null | undefined): ListingPoster {
     verified: Boolean(u.verified),
     canRevealPhone: Boolean(u.showPhone),
     memberSince: iso(u.createdAt ?? null),
+    profilePath: profilePathFor(u.role, u.profileSlug),
   };
 }
 
@@ -152,6 +178,18 @@ function core(p: Lean): ListingCore {
       isDemo: i.isDemo ?? false,
     })),
     coverImage: cover(p),
+    location: fromGeo(p.geo as GeoField),
+    videoUrl: p.videoUrl ?? null,
+    project: null,
+    plotApproval: (p.plotApproval as PublicProperty['plotApproval']) ?? null,
+    cornerPlot: p.cornerPlot ?? false,
+    roadWidthFt: p.roadWidthFt ?? null,
+    openSides: p.openSides ?? null,
+    boundaryWall: p.boundaryWall ?? false,
+    pgSharing: (p.pgSharing ?? []) as PublicProperty['pgSharing'],
+    pgGender: (p.pgGender as PublicProperty['pgGender']) ?? null,
+    pgFoodIncluded: p.pgFoodIncluded ?? false,
+    views: p.views ?? 0,
     availableFrom: iso(p.availableFrom),
     featured: p.featured ?? false,
     verified: p.verified ?? false,
@@ -198,6 +236,10 @@ export function toCard(p: Lean): PropertyCard {
     publishedAt: c.publishedAt,
     posterType: (p.posterType as PosterType) ?? 'nexus',
     imageCount: p.images?.length ?? 0,
+    areaSqft: c.areaSqft,
+    location: c.location,
+    plotApproval: c.plotApproval,
+    pgGender: c.pgGender,
   };
 }
 
@@ -221,6 +263,7 @@ function toOwn(p: Lean, enquiryCount = 0): OwnListing {
     moderationNote: p.moderationNote ?? null,
     createdAt: iso(p.createdAt)!,
     enquiryCount,
+    projectId: p.projectId ? String(p.projectId) : null,
   };
 }
 
@@ -247,7 +290,7 @@ async function postersById(ids: (Types.ObjectId | null | undefined)[]) {
   const unique = [...new Set(ids.filter(Boolean).map(String))];
   if (!unique.length) return new Map<string, PosterUser>();
   const users = await User.find({ _id: { $in: unique } })
-    .select('name role companyName verified showPhone email phone createdAt')
+    .select('name role companyName verified showPhone email phone createdAt profileSlug')
     .lean<PosterUser[]>();
   return new Map(users.map((u) => [String(u._id), u]));
 }
@@ -266,11 +309,14 @@ async function enquiryCounts(ids: Types.ObjectId[]) {
 /* ------------------------------------------------------------------ */
 
 const CARD_FIELDS =
-  'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType';
+  'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType geo plotApproval pgGender';
 
 const VISIBLE = { status: 'published', listingVisibility: 'public' } as const;
 
-export function buildPublicFilter(q: PropertySearch): FilterQuery<PropertyAttrs> {
+export function buildPublicFilter(
+  q: PropertySearch,
+  projectId?: Types.ObjectId | null,
+): FilterQuery<PropertyAttrs> {
   const f: FilterQuery<PropertyAttrs> = { ...VISIBLE };
   if (q.listingType) f.listingType = q.listingType;
   if (q.category) f.category = q.category;
@@ -300,6 +346,14 @@ export function buildPublicFilter(q: PropertySearch): FilterQuery<PropertyAttrs>
   if (q.postedBy) f.posterType = q.postedBy;
   if (q.verified) f.verified = true;
   if (q.featured) f.featured = true;
+  if (q.withPhotos) f['images.0'] = { $exists: true };
+  if (q.rera) f.reraId = { $nin: [null, ''], $exists: true };
+  if (q.plotApproval?.length) f.plotApproval = { $in: q.plotApproval };
+  if (q.pgGender) f.pgGender = { $in: [q.pgGender, 'any'] };
+  if (q.pgFood) f.pgFoodIncluded = true;
+  if (q.postedWithin) f.publishedAt = { $gte: new Date(Date.now() - q.postedWithin * 86_400_000) };
+  if (q.poster) f.postedBy = new Types.ObjectId(q.poster);
+  if (q.project) f.projectId = projectId ?? new Types.ObjectId('000000000000000000000000');
   if (q.q) f.$text = { $search: q.q };
   return f;
 }
@@ -308,12 +362,17 @@ const SORTS: Record<PropertySearch['sort'], Record<string, SortOrder>> = {
   newest: { featured: -1, publishedAt: -1, _id: -1 },
   price_asc: { price: 1, _id: 1 },
   price_desc: { price: -1, _id: -1 },
+  area_desc: { areaSqft: -1, _id: -1 },
 };
 
 export async function searchPublic(
   q: PropertySearch,
 ): Promise<{ items: PropertyCard[]; meta: PaginationMeta }> {
-  const filter = buildPublicFilter(q);
+  const projectId = q.project
+    ? ((await Project.findOne({ slug: q.project, status: 'published' }).select('_id').lean())
+        ?._id ?? null)
+    : null;
+  const filter = buildPublicFilter(q, projectId as Types.ObjectId | null);
   const [rows, total] = await Promise.all([
     Property.find(filter)
       .select(CARD_FIELDS)
@@ -333,9 +392,17 @@ export type PublicDetailResult =
 export async function getPublicBySlug(slug: string): Promise<PublicDetailResult> {
   const p = await Property.findOne({ slug, status: { $in: PUBLIC_DETAIL_STATUSES } }).lean<Lean>();
   if (p) {
-    const posters = await postersById([p.postedBy]);
+    const [posters, project] = await Promise.all([
+      postersById([p.postedBy]),
+      p.projectId
+        ? Project.findOne({ _id: p.projectId, status: 'published' }).select('slug name').lean()
+        : null,
+    ]);
     const poster = posterFrom(p, p.postedBy ? posters.get(String(p.postedBy)) : null);
-    return { kind: 'found', property: toPublic(p, poster), similar: await findSimilar(p) };
+    const property = toPublic(p, poster);
+    if (project)
+      property.project = { id: String(project._id), slug: project.slug, name: project.name };
+    return { kind: 'found', property, similar: await findSimilar(p) };
   }
   const redirect = await SlugRedirect.findOne({ fromSlug: slug }).lean();
   if (redirect) {
@@ -411,6 +478,11 @@ export async function listHomeSections() {
   };
 }
 
+/** Counts a detail-page view. Called from the browser so cached pages still count. */
+export async function recordView(id: string) {
+  await Property.updateOne({ _id: id, ...VISIBLE }, { $inc: { views: 1 } });
+}
+
 /** Lightweight list for the XML sitemap. Demo listings are noindex, so they are excluded. */
 export async function sitemapEntries() {
   const rows = await Property.find({ ...VISIBLE, isDemo: { $ne: true } })
@@ -466,6 +538,39 @@ function normaliseForType<T extends Record<string, unknown>>(data: T, listingTyp
     out.reraId = undefined;
   }
   return out as T;
+}
+
+/** Clears plot or PG fields on other property types, and maps the pin to GeoJSON. */
+function normaliseExtras<T extends Record<string, unknown>>(data: T, propertyType?: string): T {
+  const out: Record<string, unknown> = { ...data };
+  if ('location' in out) {
+    const loc = out.location as { lat: number; lng: number } | null | undefined;
+    delete out.location;
+    if (loc) out.geo = toGeo(loc);
+    else if (loc === null) out.geo = undefined;
+  }
+  if (propertyType && !PLOT_TYPES.includes(propertyType)) {
+    Object.assign(out, {
+      plotApproval: null,
+      cornerPlot: false,
+      roadWidthFt: null,
+      openSides: null,
+      boundaryWall: false,
+    });
+  }
+  if (propertyType && propertyType !== 'pg') {
+    Object.assign(out, { pgSharing: [], pgGender: null, pgFoodIncluded: false });
+  }
+  return out as T;
+}
+
+/** A listing may point at a published project in the same city. */
+async function checkProject(projectId: string | null | undefined, citySlug: string) {
+  if (!projectId) return;
+  const ok = await Project.exists({ _id: projectId, status: 'published', citySlug });
+  if (!ok) {
+    throw badRequest('Unknown project', { projectId: ['Choose a live project in this city'] });
+  }
 }
 
 function statusSideEffects(current: Partial<Lean>, next: PropertyStatus) {
@@ -557,8 +662,9 @@ export async function createProperty(
   const slug = input.slug
     ? await ensureSlugFree(input.slug)
     : await uniqueSlug(`${input.title} ${loc.localityName}`);
+  await checkProject(input.projectId, input.citySlug);
   const doc = await Property.create({
-    ...normaliseForType(input, input.listingType),
+    ...normaliseExtras(normaliseForType(input, input.listingType), input.propertyType),
     slug,
     cityName: loc.cityName,
     localityName: loc.localityName,
@@ -588,6 +694,10 @@ async function applyUpdate(
   let set: Record<string, unknown> = { ...patch, updatedBy: actorId };
   if (patch.listingType && patch.listingType !== current.listingType) {
     set = normaliseForType(set, patch.listingType);
+  }
+  set = normaliseExtras(set, patch.propertyType);
+  if (patch.projectId !== undefined || patch.citySlug) {
+    await checkProject(merged.projectId ? String(merged.projectId) : null, merged.citySlug);
   }
 
   if (patch.citySlug || patch.localitySlug) {
@@ -751,8 +861,9 @@ export async function createMine(
 ): Promise<OwnListing> {
   if (input.status === 'pending') await assertUnderLimit(user.id, user.role);
   const loc = await resolveLocation(input.citySlug, input.localitySlug, { activeOnly: true });
+  await checkProject(input.projectId, input.citySlug);
   const doc = await Property.create({
-    ...normaliseForType(input, input.listingType),
+    ...normaliseExtras(normaliseForType(input, input.listingType), input.propertyType),
     slug: await uniqueSlug(`${input.title} ${loc.localityName}`),
     cityName: loc.cityName,
     localityName: loc.localityName,
