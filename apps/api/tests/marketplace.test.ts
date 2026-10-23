@@ -212,6 +212,9 @@ describe('agent and builder profiles', () => {
     expect(directory.map((d: { slug: string }) => d.slug)).toEqual(['mehta-realty']);
     await request(app).get('/api/v1/builders/mehta-realty').expect(404);
 
+    const sitemap = (await request(app).get('/api/v1/sitemap/profiles')).body.data;
+    expect(sitemap.map((r: { path: string }) => r.path)).toEqual(['/agents/mehta-realty']);
+
     const owner = await signUpUser(app, 'individual');
     expect((await owner.get('/api/v1/me')).body.data.user.profileSlug).toBeNull();
   });
