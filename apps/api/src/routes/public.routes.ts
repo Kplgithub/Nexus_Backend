@@ -133,6 +133,11 @@ for (const [path, role] of [
   });
 }
 
+publicRouter.get('/sitemap/profiles', async (_req, res) => {
+  cache(res, 300);
+  ok(res, await profiles.sitemapProfiles());
+});
+
 /* ---------------- Reports ---------------- */
 
 publicRouter.post('/reports', limiters.publicForm, optionalUser, async (req, res) => {

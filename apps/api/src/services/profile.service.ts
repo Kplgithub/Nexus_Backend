@@ -121,3 +121,24 @@ export async function listProfiles(q: {
     meta: paginate(q.page, q.limit, ranked.length),
   };
 }
+
+/** Agent and builder pages for the sitemap: only profiles with something live. */
+export async function sitemapProfiles() {
+  const [posters, builders] = await Promise.all([
+    Property.distinct('postedBy', LIVE),
+    Project.distinct('builder', { status: 'published' }),
+  ]);
+  const users = await User.find({
+    _id: { $in: [...posters, ...builders] },
+    role: { $in: ['agent', 'builder'] },
+    status: 'active',
+    profileSlug: { $exists: true, $ne: null },
+  })
+    .select('role profileSlug updatedAt')
+    .limit(10_000)
+    .lean<{ role: Role; profileSlug: string; updatedAt: Date }[]>();
+  return users.map((u) => ({
+    path: `/${u.role === 'agent' ? 'agents' : 'builders'}/${u.profileSlug}`,
+    updatedAt: new Date(u.updatedAt).toISOString(),
+  }));
+}
