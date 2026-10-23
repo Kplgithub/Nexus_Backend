@@ -9,10 +9,13 @@ import {
   FAQ_CATEGORIES,
   INDIAN_STATES,
   propertySearchSchema,
+  projectSearchSchema,
+  reportCreateSchema,
   type CategoryInfo,
 } from '@nexus/shared';
+import { z } from 'zod';
 import { env } from '../config/env.js';
-import { parseBody, parseQuery } from '../middleware/validate.js';
+import { parseBody, parseId, parseQuery } from '../middleware/validate.js';
 import { limiters } from '../middleware/security.js';
 import { created, ok } from '../lib/respond.js';
 import { notFound } from '../lib/errors.js';
@@ -21,6 +24,9 @@ import { optionalUser } from '../middleware/user-auth.js';
 import * as properties from '../services/property.service.js';
 import * as locations from '../services/location.service.js';
 import * as faqs from '../services/faq.service.js';
+import * as projects from '../services/project.service.js';
+import * as profiles from '../services/profile.service.js';
+import * as reports from '../services/report.service.js';
 import * as leads from '../services/enquiry.service.js';
 import { getPublicSettings } from '../services/settings.service.js';
 
@@ -51,9 +57,89 @@ publicRouter.get('/properties/:slug', async (req, res) => {
   ok(res, { property: result.property, similar: result.similar });
 });
 
+publicRouter.post('/properties/:id/view', limiters.view, async (req, res) => {
+  await properties.recordView(parseId(req));
+  res.set('Cache-Control', 'no-store');
+  ok(res, { counted: true });
+});
+
 publicRouter.get('/home', async (_req, res) => {
   cache(res);
-  ok(res, await properties.listHomeSections());
+  const [sections, newProjects] = await Promise.all([
+    properties.listHomeSections(),
+    projects.searchProjects({ page: 1, limit: 6 }),
+  ]);
+  ok(res, { ...sections, projects: newProjects.items });
+});
+
+/* ---------------- New projects ---------------- */
+
+publicRouter.get('/projects', async (req, res) => {
+  const { items, meta } = await projects.searchProjects(parseQuery(projectSearchSchema, req));
+  cache(res);
+  ok(res, items, meta);
+});
+
+publicRouter.get('/projects/options', async (req, res) => {
+  const city = String(req.query.city ?? '').toLowerCase();
+  if (!SLUG_PATTERN.test(city)) return ok(res, []);
+  cache(res);
+  ok(res, await projects.projectOptions(city));
+});
+
+publicRouter.get('/projects/:slug', async (req, res) => {
+  const slug = String(req.params.slug).toLowerCase();
+  if (!SLUG_PATTERN.test(slug) || slug.length > 100) throw notFound('Project not found');
+  cache(res);
+  ok(res, await projects.getPublicProject(slug));
+});
+
+publicRouter.post('/projects/:id/view', limiters.view, async (req, res) => {
+  await projects.recordProjectView(parseId(req));
+  res.set('Cache-Control', 'no-store');
+  ok(res, { counted: true });
+});
+
+publicRouter.get('/sitemap/projects', async (_req, res) => {
+  cache(res, 300);
+  ok(res, await projects.sitemapProjects());
+});
+
+/* ---------------- Agents and builders ---------------- */
+
+const profileQuery = z.object({
+  city: z.string().regex(SLUG_PATTERN).optional().catch(undefined),
+  locality: z.string().regex(SLUG_PATTERN).optional().catch(undefined),
+  q: z.string().trim().max(80).optional().catch(undefined),
+  page: z.coerce.number().int().min(1).max(1000).catch(1).default(1),
+  limit: z.coerce.number().int().min(1).max(48).catch(24).default(24),
+});
+
+for (const [path, role] of [
+  ['agents', 'agent'],
+  ['builders', 'builder'],
+] as const) {
+  publicRouter.get(`/${path}`, async (req, res) => {
+    const q = parseQuery(profileQuery, req);
+    const { items, meta } = await profiles.listProfiles({ ...q, role, q: q.q || undefined });
+    cache(res);
+    ok(res, items, meta);
+  });
+  publicRouter.get(`/${path}/:slug`, async (req, res) => {
+    const slug = String(req.params.slug).toLowerCase();
+    if (!SLUG_PATTERN.test(slug) || slug.length > 100) throw notFound('Profile not found');
+    cache(res);
+    ok(res, await profiles.getProfile(role, slug));
+  });
+}
+
+/* ---------------- Reports ---------------- */
+
+publicRouter.post('/reports', limiters.publicForm, optionalUser, async (req, res) => {
+  const input = parseBody(reportCreateSchema, req);
+  await reports.createReport(input, { ipHash: hashIp(req.ip) }, req.user);
+  res.set('Cache-Control', 'no-store');
+  created(res, { received: true });
 });
 
 publicRouter.get('/sitemap/properties', async (_req, res) => {
@@ -71,6 +157,15 @@ publicRouter.get('/locations/:city', async (req, res) => {
   if (!SLUG_PATTERN.test(slug)) throw notFound('City not found');
   cache(res);
   ok(res, await locations.getPublicCity(slug));
+});
+
+publicRouter.get('/locations/:city/:locality/insights', async (req, res) => {
+  const city = String(req.params.city).toLowerCase();
+  const locality = String(req.params.locality).toLowerCase();
+  if (!SLUG_PATTERN.test(city) || !SLUG_PATTERN.test(locality))
+    throw notFound('Locality not found');
+  cache(res);
+  ok(res, await locations.getLocalityInsights(city, locality));
 });
 
 publicRouter.get('/categories', (_req, res) => {

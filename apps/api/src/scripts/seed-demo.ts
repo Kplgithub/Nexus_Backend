@@ -5,9 +5,18 @@
  * after launch.
  */
 import { randomBytes } from 'node:crypto';
-import { propertyCreateSchema, type PropertyCreateInput } from '@nexus/shared';
+import {
+  projectCreateSchema,
+  propertyCreateSchema,
+  slugify,
+  type ProjectCreateInput,
+  type PropertyCreateInput,
+} from '@nexus/shared';
 import { Property } from '../models/property.model.js';
+import { Project } from '../models/project.model.js';
 import { createProperty } from '../services/property.service.js';
+import { createMyProject } from '../services/project.service.js';
+import { JAIPUR_LOCALITIES } from './jaipur-data.js';
 import { hashPassword } from '../services/auth.service.js';
 import { User } from '../models/user.model.js';
 import { runScript } from './run.js';
@@ -307,6 +316,33 @@ const rentDemos: Omit<Demo, 'listingType'>[] = [
   },
 ];
 
+rentDemos.push({
+  poster: 'owner',
+  title: 'Girls PG with meals near MNIT',
+  description: `${NOTE}\n\nA clean, secure paying-guest accommodation for working women and students, with two meals a day, Wi-Fi, housekeeping and CCTV at the entrance.`,
+  highlights: ['Two meals included', 'Wi-Fi and housekeeping', '5 minutes to MNIT'],
+  category: 'residential',
+  propertyType: 'pg',
+  status: 'published',
+  citySlug: 'jaipur',
+  localitySlug: 'malviya-nagar',
+  approvedAddress: 'Near MNIT (demo address)',
+  price: 9500,
+  securityDeposit: 9500,
+  areaValue: 140,
+  areaUnit: 'sqft',
+  bedrooms: 1,
+  bathrooms: 1,
+  furnishingStatus: 'furnished',
+  amenities: ['wifi', 'cctv', 'power-backup', 'water-supply-24x7'],
+  parking: 'bike',
+  preferredTenants: ['students'],
+  pgSharing: ['double', 'triple'],
+  pgGender: 'female',
+  pgFoodIncluded: true,
+  images: [img('bedroom', 'PG room'), img('kitchen', 'Dining area')],
+});
+
 const saleDemos: Omit<Demo, 'listingType'>[] = [
   {
     poster: 'builder',
@@ -447,6 +483,82 @@ const saleDemos: Omit<Demo, 'listingType'>[] = [
   },
 ];
 
+saleDemos.push({
+  poster: 'agent',
+  title: 'JDA approved corner plot on 40 ft road',
+  description: `${NOTE}\n\nA 200 square-yard JDA approved residential plot in a developed colony off Ajmer Road. Corner plot with two open sides, boundary wall done and all utilities available at the gate.`,
+  highlights: ['JDA approved', 'Corner plot, two sides open', '40 ft road in front'],
+  category: 'residential',
+  propertyType: 'plot',
+  status: 'published',
+  citySlug: 'jaipur',
+  localitySlug: 'ajmer-road',
+  approvedAddress: 'Off Ajmer Road (demo address)',
+  price: 5400000,
+  areaValue: 200,
+  areaUnit: 'sqyd',
+  areaType: 'plot',
+  furnishingStatus: 'unfurnished',
+  transactionType: 'resale',
+  ownershipType: 'freehold',
+  plotApproval: 'jda',
+  cornerPlot: true,
+  roadWidthFt: 40,
+  openSides: 2,
+  boundaryWall: true,
+  images: [img('house-exterior', 'Plot and surroundings')],
+});
+
+const DEMO_PROJECT: Omit<ProjectCreateInput, 'status'> = {
+  name: 'Demo Aravali Heights',
+  description: `${NOTE}\n\nA gated community of 2 and 3 BHK apartments across four towers in Jagatpura, with a clubhouse, pool and landscaped central lawn. Rajasthan RERA registration shown is a sample.`,
+  highlights: ['4 towers, 320 homes', 'Clubhouse and swimming pool', '2 km to Jagatpura station'],
+  citySlug: 'jaipur',
+  localitySlug: 'jagatpura',
+  address: 'Near Jagatpura flyover (demo address)',
+  stage: 'under-construction',
+  launchDate: new Date('2025-01-15'),
+  possessionDate: new Date('2028-06-30'),
+  reraId: 'RAJ/P/2025/0000 (sample)',
+  totalUnits: 320,
+  totalTowers: 4,
+  landAreaAcres: 4.5,
+  configurations: [
+    {
+      unitType: 'apartment',
+      bedrooms: 2,
+      minAreaSqft: 1050,
+      maxAreaSqft: 1200,
+      minPrice: 4200000,
+      maxPrice: 4900000,
+    },
+    {
+      unitType: 'apartment',
+      bedrooms: 3,
+      minAreaSqft: 1450,
+      maxAreaSqft: 1700,
+      minPrice: 6100000,
+      maxPrice: 7200000,
+    },
+  ],
+  amenities: [
+    'lift',
+    'power-backup',
+    'security',
+    'cctv',
+    'gated-community',
+    'gym',
+    'swimming-pool',
+    'clubhouse',
+    'park',
+  ],
+  images: [
+    img('apartment-exterior', 'Project towers'),
+    img('living-room', 'Sample flat living room'),
+    img('kitchen', 'Sample flat kitchen'),
+  ],
+};
+
 const DEMO_USERS = {
   owner: {
     role: 'individual',
@@ -461,6 +573,11 @@ const DEMO_USERS = {
     email: 'demo.agent@example.com',
     phone: '+919000000002',
     verified: true,
+    citySlug: 'jaipur',
+    localities: ['vaishali-nagar', 'ajmer-road', 'malviya-nagar'],
+    experienceYears: 9,
+    about:
+      'Demo account. Helps families buy, sell and rent homes and plots in west and south Jaipur.',
   },
   builder: {
     role: 'builder',
@@ -469,6 +586,10 @@ const DEMO_USERS = {
     email: 'demo.builder@example.com',
     phone: '+919000000003',
     verified: true,
+    citySlug: 'jaipur',
+    localities: ['jagatpura', 'tonk-road'],
+    experienceYears: 15,
+    about: 'Demo account. Builds mid-size residential projects in south-east Jaipur.',
   },
 } as const;
 await runScript('seed:demo', async () => {
@@ -482,6 +603,7 @@ await runScript('seed:demo', async () => {
   for (const [key, u] of Object.entries(DEMO_USERS)) {
     const doc = await User.create({
       ...u,
+      profileSlug: u.role === 'individual' ? undefined : slugify(u.companyName),
       phoneVerified: true,
       passwordHash: await hashPassword(randomBytes(24).toString('base64url')),
       termsAcceptedAt: new Date(),
@@ -494,8 +616,35 @@ await runScript('seed:demo', async () => {
     ...rentDemos.map((d) => ({ ...d, listingType: 'rent' as const })),
     ...saleDemos.map((d) => ({ ...d, listingType: 'sale' as const })),
   ];
+  // Pins near (not on) the locality centre, spread so markers don't stack.
+  const centres = new Map(JAIPUR_LOCALITIES.map((l) => [slugify(l.name), l.center]));
+  const pin = (locality: string, i: number) => {
+    const c = centres.get(locality);
+    if (!c) return null;
+    const a = (i * 137.5 * Math.PI) / 180;
+    const r = 0.004 + (i % 3) * 0.002;
+    return {
+      lat: +(c.lat + r * Math.sin(a)).toFixed(5),
+      lng: +(c.lng + r * Math.cos(a)).toFixed(5),
+    };
+  };
+
+  const project = await createMyProject(
+    { id: posters.builder!, role: 'builder' },
+    projectCreateSchema.parse({ ...DEMO_PROJECT, location: pin('jagatpura', 99), status: 'draft' }),
+  );
+  await Project.updateOne(
+    { _id: project.id },
+    { $set: { isDemo: true, status: 'published', publishedAt: new Date(), featured: true } },
+  );
+
+  let i = 0;
   for (const { poster, ...d } of all) {
-    const input = propertyCreateSchema.parse({ ...d, isDemo: true });
+    const input = propertyCreateSchema.parse({
+      ...d,
+      isDemo: true,
+      location: d.location ?? pin(d.citySlug === 'jaipur' ? d.localitySlug : '', i++),
+    });
     const created = await createProperty(input, systemId);
     if (poster) {
       await Property.updateOne(
@@ -505,6 +654,6 @@ await runScript('seed:demo', async () => {
     }
   }
   console.warn(
-    `Inserted ${all.length} demo listings and ${Object.keys(posters).length} demo accounts.`,
+    `Inserted ${all.length} demo listings, 1 demo project and ${Object.keys(posters).length} demo accounts.`,
   );
 });

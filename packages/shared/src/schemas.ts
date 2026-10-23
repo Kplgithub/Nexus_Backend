@@ -26,7 +26,17 @@ import {
   PREFERRED_TENANTS,
   PROPERTY_STATUSES,
   PROPERTY_TYPES,
+  PG_GENDERS,
+  PG_SHARING,
+  PLOT_APPROVALS,
+  POSTED_WITHIN_DAYS,
+  PROJECT_STAGES,
+  PROJECT_STATUSES,
+  PROJECT_UNIT_TYPES,
+  REPORT_REASONS,
+  REPORT_STATUSES,
   SORT_OPTIONS,
+  LANDMARK_KINDS,
   TYPES_REQUIRING_ROOMS,
   type Category,
   type PropertyType,
@@ -103,6 +113,23 @@ const queryBool = z
   .optional()
   .transform((v) => (v === true || v === 'true' || v === '1' ? true : undefined));
 
+/** A map pin. Limited to India's bounding box so a swapped lat/lng is caught. */
+export const geoPointSchema = z.object({
+  lat: z.number().min(6, 'Pin must be in India').max(37.5, 'Pin must be in India'),
+  lng: z.number().min(68, 'Pin must be in India').max(97.5, 'Pin must be in India'),
+});
+export type GeoPoint = z.output<typeof geoPointSchema>;
+
+/** YouTube watch/share/shorts links only; embedded with youtube-nocookie on the page. */
+const videoUrl = z
+  .string()
+  .trim()
+  .max(200)
+  .refine(
+    (v) => /^https:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{6,}/.test(v),
+    'Use a YouTube link',
+  );
+
 const querySlug = z
   .string()
   .optional()
@@ -139,6 +166,20 @@ export const propertySearchSchema = z
     possession: queryEnum(POSSESSION_STATUSES),
     postedBy: queryEnum(['owner', 'agent', 'builder', 'nexus'] as const),
     verified: queryBool,
+    withPhotos: queryBool,
+    rera: queryBool,
+    plotApproval: csvList(PLOT_APPROVALS),
+    pgGender: queryEnum(PG_GENDERS),
+    pgFood: queryBool,
+    postedWithin: queryNumber(1, 30).transform((v) =>
+      v === undefined ? undefined : (POSTED_WITHIN_DAYS.find((d) => d >= v) ?? 30),
+    ),
+    project: querySlug,
+    /** Listings by one poster, for agent and builder profile pages. */
+    poster: z
+      .string()
+      .optional()
+      .transform((v) => (v && /^[a-f0-9]{24}$/i.test(v) ? v : undefined)),
     q: z
       .string()
       .optional()
@@ -261,6 +302,24 @@ const userPropertyFields = {
 
   images: z.array(propertyImageSchema).max(30).default([]),
   coverImageIndex: z.number().int().min(0).default(0),
+
+  /** Approximate pin; shown on the map. Owners may place it near, not on, the building. */
+  location: geoPointSchema.nullable().optional(),
+  videoUrl: videoUrl.optional().or(z.literal('').transform(() => undefined)),
+  /** Set when the listing is a unit in a NEXUS project page. */
+  projectId: objectIdSchema.nullable().optional(),
+
+  // Plots
+  plotApproval: z.enum(PLOT_APPROVALS).nullable().optional(),
+  cornerPlot: z.boolean().default(false),
+  roadWidthFt: count(300).nullable().optional(),
+  openSides: z.number().int().min(1).max(4).nullable().optional(),
+  boundaryWall: z.boolean().default(false),
+
+  // PG / hostel
+  pgSharing: z.array(z.enum(PG_SHARING)).max(PG_SHARING.length).default([]),
+  pgGender: z.enum(PG_GENDERS).nullable().optional(),
+  pgFoodIncluded: z.boolean().default(false),
 };
 
 const propertyBase = z.object({
@@ -339,6 +398,13 @@ function refineProperty(p: Partial<PropertyBaseInput>, ctx: z.RefinementCtx) {
       code: 'custom',
       path: ['images'],
       message: 'Add at least one photo before publishing',
+    });
+  }
+  if (p.propertyType === 'pg' && p.listingType === 'sale') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['listingType'],
+      message: 'A PG can only be listed for rent',
     });
   }
   if (p.listingType === 'rent' && p.status === 'sold') {
@@ -422,6 +488,7 @@ export const enquiryCreateSchema = z.object({
     .or(z.literal('').transform(() => undefined)),
   message: plainText(0, 2000).default(''),
   propertyId: objectIdSchema.optional(),
+  projectId: objectIdSchema.optional(),
   sourcePage: z.string().trim().max(300).optional(),
   preferredContactTime: plainText(0, 60).optional(),
   consent: z.literal(true, { error: 'Please agree to be contacted' }),
@@ -566,6 +633,11 @@ export const profileUpdateSchema = z
     reraNumber: plainText(0, 60),
     about: plainText(0, 1000),
     citySlug: slug.or(z.literal('')),
+    /** Agents and builders: shown on their public profile page. */
+    experienceYears: count(80).nullable(),
+    website: z.union([z.url({ protocol: /^https$/ }).max(200), z.literal('')]),
+    logoUrl: imageUrl.or(z.literal('')),
+    localities: z.array(slug).max(40),
     /** Let signed-in visitors see this number on the user's listings. */
     showPhone: z.boolean(),
     whatsappEnabled: z.boolean(),
@@ -607,6 +679,21 @@ export const localitySchema = z.object({
   intro: plainText(0, 3000).default(''),
   seoTitle: plainText(0, 70).optional(),
   seoDescription: plainText(0, 170).optional(),
+  /** Map centre for the locality page. */
+  center: geoPointSchema.nullable().optional(),
+  /** Short points for the locality page, e.g. "10 min to Ajmer Road". */
+  highlights: z.array(plainText(2, 120)).max(10).default([]),
+  /** Schools, hospitals, malls etc. shown as "Nearby". */
+  landmarks: z
+    .array(
+      z.object({
+        name: plainText(2, 80),
+        kind: z.enum(LANDMARK_KINDS),
+        location: geoPointSchema.nullable().optional(),
+      }),
+    )
+    .max(30)
+    .default([]),
 });
 
 export const cityCreateSchema = z.object({
@@ -701,6 +788,138 @@ export const siteSettingsSchema = z.object({
 });
 export type SiteSettingsInput = z.input<typeof siteSettingsSchema>;
 export const siteSettingsUpdateSchema = siteSettingsSchema.partial();
+
+/* ------------------------------------------------------------------ */
+/* Reports                                                             */
+/* ------------------------------------------------------------------ */
+
+export const reportCreateSchema = z.object({
+  propertyId: objectIdSchema,
+  reason: z.enum(REPORT_REASONS),
+  details: plainText(0, 1000).default(''),
+  website: honeypot,
+});
+export type ReportCreateInput = z.input<typeof reportCreateSchema>;
+
+export const reportUpdateSchema = z.object({
+  status: z.enum(REPORT_STATUSES),
+  note: plainText(0, 1000).optional(),
+});
+
+export const adminReportQuerySchema = z.object({
+  status: queryEnum(REPORT_STATUSES),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 20),
+});
+
+/* ------------------------------------------------------------------ */
+/* New projects                                                        */
+/* ------------------------------------------------------------------ */
+
+export const projectConfigurationSchema = z
+  .object({
+    unitType: z.enum(PROJECT_UNIT_TYPES),
+    /** null for plots and commercial units. */
+    bedrooms: count(10).nullable().optional(),
+    /** Saleable range for this configuration, in sq ft. */
+    minAreaSqft: z.number().int().positive().max(1_000_000),
+    maxAreaSqft: z.number().int().positive().max(1_000_000),
+    minPrice: money.min(1, 'Price is required'),
+    maxPrice: money.min(1, 'Price is required'),
+    floorPlanUrl: imageUrl.optional().or(z.literal('').transform(() => undefined)),
+  })
+  .refine((c) => c.minAreaSqft <= c.maxAreaSqft, {
+    path: ['maxAreaSqft'],
+    message: 'Largest area must be at least the smallest',
+  })
+  .refine((c) => c.minPrice <= c.maxPrice, {
+    path: ['maxPrice'],
+    message: 'Highest price must be at least the lowest',
+  });
+export type ProjectConfiguration = z.output<typeof projectConfigurationSchema>;
+
+const projectFields = {
+  name: plainText(3, 100),
+  description: plainText(30, 6000),
+  highlights: z.array(plainText(2, 140)).max(12).default([]),
+  citySlug: slug,
+  localitySlug: slug,
+  address: plainText(0, 200).default(''),
+  location: geoPointSchema.nullable().optional(),
+  stage: z.enum(PROJECT_STAGES),
+  launchDate: z.coerce.date().nullable().optional(),
+  possessionDate: z.coerce.date().nullable().optional(),
+  reraId: plainText(0, 60).optional(),
+  totalUnits: count(100_000).nullable().optional(),
+  totalTowers: count(500).nullable().optional(),
+  landAreaAcres: z.number().min(0).max(100_000).nullable().optional(),
+  configurations: z.array(projectConfigurationSchema).min(1, 'Add at least one unit type').max(20),
+  amenities: z.array(z.enum(AMENITIES)).max(AMENITIES.length).default([]),
+  images: z.array(propertyImageSchema).max(30).default([]),
+  coverImageIndex: z.number().int().min(0).default(0),
+  brochureUrl: z
+    .string()
+    .trim()
+    .max(1000)
+    .regex(/^https:\/\/[^\s]+$/, 'Brochure link must be HTTPS')
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
+  videoUrl: videoUrl.optional().or(z.literal('').transform(() => undefined)),
+};
+
+/** What a builder may submit. */
+export const projectCreateSchema = z
+  .object({ ...projectFields, status: z.enum(['draft', 'pending']).default('draft') })
+  .strict();
+export type ProjectCreateInput = z.input<typeof projectCreateSchema>;
+export type ProjectCreate = z.output<typeof projectCreateSchema>;
+export const projectUpdateSchema = z
+  .object({ ...projectFields, status: z.enum(['draft', 'pending']) })
+  .partial()
+  .strict();
+export type ProjectUpdate = z.output<typeof projectUpdateSchema>;
+
+export const adminProjectUpdateSchema = z
+  .object({
+    ...projectFields,
+    featured: z.boolean(),
+    slug,
+    seoTitle: plainText(0, 70),
+    seoDescription: plainText(0, 170),
+  })
+  .partial()
+  .strict();
+
+export const projectStatusChangeSchema = z.object({
+  status: z.enum(PROJECT_STATUSES),
+  note: plainText(0, 1000).optional(),
+});
+
+export const projectSearchSchema = z.object({
+  city: querySlug,
+  locality: querySlug,
+  stage: queryEnum(PROJECT_STAGES),
+  unitType: queryEnum(PROJECT_UNIT_TYPES),
+  bedrooms: queryNumber(0, 10),
+  maxPrice: queryNumber(0, MAX_MONEY_INR),
+  builder: z
+    .string()
+    .optional()
+    .transform((v) => (v && /^[a-f0-9]{24}$/i.test(v) ? v : undefined)),
+  page: queryNumber(1, 1000).transform((v) => v ?? 1),
+  limit: queryNumber(1, PAGE_SIZE_MAX).transform((v) => v ?? PAGE_SIZE_DEFAULT),
+});
+export type ProjectSearch = z.output<typeof projectSearchSchema>;
+
+export const adminProjectQuerySchema = z.object({
+  status: queryEnum(PROJECT_STATUSES),
+  q: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.trim().slice(0, 80) || undefined : undefined)),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 20),
+});
 
 /* ------------------------------------------------------------------ */
 /* Uploads                                                             */

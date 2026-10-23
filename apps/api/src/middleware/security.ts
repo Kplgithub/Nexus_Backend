@@ -63,4 +63,6 @@ export const limiters = {
   signup: make(60 * 60_000, 10, 'Too many sign-ups from this network. Try again later.'),
   otp: make(15 * 60_000, 10, 'Too many code requests. Try again in 15 minutes.'),
   userWrite: make(60_000, 60, 'Too many requests. Please slow down.'),
+  /** Page-view beacons: generous, they only increment a counter. */
+  view: make(60_000, 120, 'Too many requests.'),
 };

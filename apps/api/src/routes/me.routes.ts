@@ -11,6 +11,9 @@ import {
   userPropertyCreateSchema,
   userPropertyStatusSchema,
   userPropertyUpdateSchema,
+  projectCreateSchema,
+  projectUpdateSchema,
+  PROJECT_STATUSES,
   type PropertyCard,
 } from '@nexus/shared';
 import { limiters } from '../middleware/security.js';
@@ -24,6 +27,7 @@ import { Property } from '../models/property.model.js';
 import * as users from '../services/user.service.js';
 import * as properties from '../services/property.service.js';
 import * as leads from '../services/enquiry.service.js';
+import * as projects from '../services/project.service.js';
 import { getUserDashboard } from '../services/dashboard.service.js';
 import { storeImage } from '../services/upload.service.js';
 
@@ -115,6 +119,39 @@ meRouter.post('/properties/:id/status', limiters.userWrite, async (req, res) => 
 
 meRouter.delete('/properties/:id', limiters.userWrite, async (req, res) => {
   await properties.deleteMine(req.user!.id, parseId(req));
+  ok(res, { deleted: true });
+});
+
+/* ---------------- My projects (builders) ---------------- */
+
+meRouter.get('/projects', async (req, res) => {
+  ok(res, await projects.listMyProjects(req.user!.id));
+});
+
+meRouter.post('/projects', limiters.userWrite, async (req, res) => {
+  created(res, await projects.createMyProject(req.user!, parseBody(projectCreateSchema, req)));
+});
+
+meRouter.get('/projects/:id', async (req, res) => {
+  ok(res, await projects.getMyProject(req.user!.id, parseId(req)));
+});
+
+meRouter.patch('/projects/:id', limiters.userWrite, async (req, res) => {
+  const id = parseId(req);
+  const patch = onlySentKeys(parseBody(projectUpdateSchema, req), req.body);
+  if (!Object.keys(patch).length) throw badRequest('Nothing to update');
+  ok(res, await projects.updateMyProject(req.user!, id, patch));
+});
+
+const projectStatusBody = z.object({ status: z.enum(PROJECT_STATUSES) });
+
+meRouter.post('/projects/:id/status', limiters.userWrite, async (req, res) => {
+  const { status } = parseBody(projectStatusBody, req);
+  ok(res, await projects.setMyProjectStatus(req.user!, parseId(req), status));
+});
+
+meRouter.delete('/projects/:id', limiters.userWrite, async (req, res) => {
+  await projects.deleteMyProject(req.user!.id, parseId(req));
   ok(res, { deleted: true });
 });
 

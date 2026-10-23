@@ -222,6 +222,37 @@ export const AMENITY_LABELS: Record<Amenity, string> = {
   'pet-friendly': 'Pet friendly',
 };
 
+/* ---------------- Plots and PG ---------------- */
+
+/** Who approved a plot's layout. Buyers in Jaipur filter on JDA approval first. */
+export const PLOT_APPROVALS = ['jda', 'rhb', 'municipal', 'panchayat', 'other', 'none'] as const;
+export type PlotApproval = (typeof PLOT_APPROVALS)[number];
+export const PLOT_APPROVAL_LABELS: Record<PlotApproval, string> = {
+  jda: 'JDA approved',
+  rhb: 'RHB (Housing Board)',
+  municipal: 'Municipal corporation',
+  panchayat: 'Gram panchayat',
+  other: 'Other authority',
+  none: 'Not approved yet',
+};
+
+export const PG_SHARING = ['single', 'double', 'triple', 'dorm'] as const;
+export type PgSharing = (typeof PG_SHARING)[number];
+export const PG_SHARING_LABELS: Record<PgSharing, string> = {
+  single: 'Single room',
+  double: 'Double sharing',
+  triple: 'Triple sharing',
+  dorm: '4+ sharing',
+};
+
+export const PG_GENDERS = ['any', 'male', 'female'] as const;
+export type PgGender = (typeof PG_GENDERS)[number];
+export const PG_GENDER_LABELS: Record<PgGender, string> = {
+  any: 'Boys and girls',
+  male: 'Boys only',
+  female: 'Girls only',
+};
+
 export const PREFERRED_TENANTS = ['any', 'family', 'bachelors', 'company', 'students'] as const;
 export type PreferredTenant = (typeof PREFERRED_TENANTS)[number];
 export const PREFERRED_TENANT_LABELS: Record<PreferredTenant, string> = {
@@ -239,14 +270,104 @@ export type EnquiryStatus = (typeof ENQUIRY_STATUSES)[number];
 export const ENQUIRY_TYPES = ['property', 'general', 'callback', 'contact'] as const;
 export type EnquiryType = (typeof ENQUIRY_TYPES)[number];
 
-export const SORT_OPTIONS = ['newest', 'price_asc', 'price_desc'] as const;
+export const SORT_OPTIONS = ['newest', 'price_asc', 'price_desc', 'area_desc'] as const;
 export type SortOption = (typeof SORT_OPTIONS)[number];
 
 export const SORT_LABELS: Record<SortOption, string> = {
   newest: 'Newest first',
   price_asc: 'Price: low to high',
   price_desc: 'Price: high to low',
+  area_desc: 'Largest first',
 };
+
+/** "Posted within" filter, in days. */
+export const POSTED_WITHIN_DAYS = [1, 7, 30] as const;
+
+/* ---------------- Localities ---------------- */
+
+export const LANDMARK_KINDS = [
+  'school',
+  'college',
+  'hospital',
+  'mall',
+  'market',
+  'metro',
+  'railway',
+  'bus',
+  'airport',
+  'park',
+  'office',
+  'temple',
+] as const;
+export type LandmarkKind = (typeof LANDMARK_KINDS)[number];
+export const LANDMARK_KIND_LABELS: Record<LandmarkKind, string> = {
+  school: 'School',
+  college: 'College',
+  hospital: 'Hospital',
+  mall: 'Mall',
+  market: 'Market',
+  metro: 'Metro station',
+  railway: 'Railway station',
+  bus: 'Bus stand',
+  airport: 'Airport',
+  park: 'Park',
+  office: 'Office hub',
+  temple: 'Temple',
+};
+
+/* ---------------- Reports ---------------- */
+
+export const REPORT_REASONS = [
+  'already-rented-or-sold',
+  'wrong-price',
+  'wrong-photos',
+  'fake-or-fraud',
+  'broker-posing-as-owner',
+  'other',
+] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+export const REPORT_REASON_LABELS: Record<ReportReason, string> = {
+  'already-rented-or-sold': 'Already rented or sold',
+  'wrong-price': 'Wrong price or details',
+  'wrong-photos': 'Photos are not of this property',
+  'fake-or-fraud': 'Looks fake or fraudulent',
+  'broker-posing-as-owner': 'Broker posing as owner',
+  other: 'Something else',
+};
+export const REPORT_STATUSES = ['open', 'resolved', 'dismissed'] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+
+/* ---------------- New projects (builders) ---------------- */
+
+export const PROJECT_STATUSES = ['draft', 'pending', 'published', 'rejected', 'inactive'] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  draft: 'Draft',
+  pending: 'In review',
+  published: 'Live',
+  rejected: 'Changes needed',
+  inactive: 'Inactive',
+};
+
+export const PROJECT_STAGES = ['new-launch', 'under-construction', 'ready-to-move'] as const;
+export type ProjectStage = (typeof PROJECT_STAGES)[number];
+export const PROJECT_STAGE_LABELS: Record<ProjectStage, string> = {
+  'new-launch': 'New launch',
+  'under-construction': 'Under construction',
+  'ready-to-move': 'Ready to move',
+};
+
+/** Property types a project can contain. */
+export const PROJECT_UNIT_TYPES = [
+  'apartment',
+  'villa',
+  'independent-house',
+  'builder-floor',
+  'plot',
+  'office',
+  'shop',
+] as const;
+export type ProjectUnitType = (typeof PROJECT_UNIT_TYPES)[number];
 
 export const ADMIN_ROLES = ['owner', 'admin', 'editor'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];

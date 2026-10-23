@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import {
   normalizePhone,
+  slugify,
   type SessionUser,
   type UserRole,
   type profileUpdateSchema,
@@ -37,7 +38,26 @@ export function toSessionUser(u: UserLean): SessionUser {
     whatsappEnabled: u.whatsappEnabled,
     verified: u.verified,
     createdAt: new Date(u.createdAt).toISOString(),
+    experienceYears: u.experienceYears ?? null,
+    website: u.website ?? null,
+    logoUrl: u.logoUrl ?? null,
+    localities: u.localities ?? [],
+    profileSlug: u.profileSlug ?? null,
   };
+}
+
+/** A free profile slug for an agent or builder, from their business name. */
+export async function uniqueProfileSlug(base: string, excludeId?: unknown): Promise<string> {
+  const root = slugify(base).slice(0, 80) || 'profile';
+  for (let i = 0; i < 50; i++) {
+    const candidate = i === 0 ? root : `${root}-${i + 1}`;
+    const taken = await User.exists({
+      profileSlug: candidate,
+      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    });
+    if (!taken) return candidate;
+  }
+  return `${root}-${Date.now().toString(36)}`;
 }
 
 /** Indian mobile numbers only for accounts. */
@@ -90,6 +110,10 @@ export async function signup(input: z.output<typeof signupSchema>, ipHash?: stri
     companyName: input.role === 'individual' ? null : input.companyName?.trim() || null,
     reraNumber: input.reraNumber?.trim() || null,
     citySlug,
+    profileSlug:
+      input.role === 'individual'
+        ? undefined
+        : await uniqueProfileSlug(input.companyName?.trim() || input.name),
     termsAcceptedAt: new Date(),
     signupIpHash: ipHash,
   });
@@ -292,6 +316,19 @@ export async function updateProfile(userId: string, patch: z.output<typeof profi
   if (patch.about !== undefined) user.about = patch.about.trim() || null;
   if (patch.showPhone !== undefined) user.showPhone = patch.showPhone;
   if (patch.whatsappEnabled !== undefined) user.whatsappEnabled = patch.whatsappEnabled;
+  if (user.role !== 'individual') {
+    if (patch.experienceYears !== undefined) user.experienceYears = patch.experienceYears;
+    if (patch.website !== undefined) user.website = patch.website || null;
+    if (patch.logoUrl !== undefined) user.logoUrl = patch.logoUrl || null;
+    if (patch.localities !== undefined) {
+      const city = user.citySlug ? await City.findOne({ slug: user.citySlug }).lean() : null;
+      const known = new Set((city?.localities ?? []).map((l) => l.slug));
+      user.localities = [...new Set(patch.localities)].filter((l) => known.has(l));
+    }
+    if (!user.profileSlug) {
+      user.profileSlug = await uniqueProfileSlug(user.companyName || user.name, user._id);
+    }
+  }
   await user.save();
   return toSessionUser(user.toObject() as unknown as UserLean);
 }

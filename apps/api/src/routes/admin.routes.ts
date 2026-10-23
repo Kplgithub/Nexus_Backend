@@ -17,6 +17,11 @@ import {
   propertyStatusChangeSchema,
   propertyUpdateSchema,
   siteSettingsUpdateSchema,
+  adminProjectQuerySchema,
+  adminProjectUpdateSchema,
+  projectStatusChangeSchema,
+  adminReportQuerySchema,
+  reportUpdateSchema,
 } from '@nexus/shared';
 import { clearSession, issueSession, requireAuth, requireRole } from '../middleware/auth.js';
 import { limiters } from '../middleware/security.js';
@@ -33,6 +38,8 @@ import { getDashboard } from '../services/dashboard.service.js';
 import { storeImage } from '../services/upload.service.js';
 import { audit } from '../services/support.service.js';
 import * as adminUsers from '../services/admin-users.service.js';
+import * as projects from '../services/project.service.js';
+import * as reports from '../services/report.service.js';
 
 export const adminRouter: RouterType = Router();
 
@@ -129,6 +136,58 @@ adminRouter.delete('/properties/:id', requireRole('admin'), async (req, res) => 
   const removed = await properties.deleteProperty(id);
   await audit(req.admin, 'delete', 'property', id, removed.title);
   ok(res, { deleted: true });
+});
+
+/* ---------------- Projects ---------------- */
+
+adminRouter.get('/projects', async (req, res) => {
+  const { items, meta } = await projects.listAdminProjects(
+    parseQuery(adminProjectQuerySchema, req),
+  );
+  ok(res, items, meta);
+});
+
+adminRouter.get('/projects/:id', async (req, res) =>
+  ok(res, await projects.getAdminProject(parseId(req))),
+);
+
+adminRouter.patch('/projects/:id', requireRole('editor'), async (req, res) => {
+  const id = parseId(req);
+  const patch = onlySentKeys(parseBody(adminProjectUpdateSchema, req), req.body);
+  if (!Object.keys(patch).length) throw badRequest('Nothing to update');
+  const p = await projects.updateAdminProject(id, patch);
+  await audit(req.admin, 'update', 'project', id, Object.keys(patch).join(', '));
+  ok(res, p);
+});
+
+adminRouter.post('/projects/:id/status', requireRole('editor'), async (req, res) => {
+  const id = parseId(req);
+  const { status, note } = parseBody(projectStatusChangeSchema, req);
+  const p = await projects.changeProjectStatus(id, status, note);
+  await audit(req.admin, `status:${status}`, 'project', id, p.name);
+  ok(res, p);
+});
+
+adminRouter.delete('/projects/:id', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const removed = await projects.deleteProject(id);
+  await audit(req.admin, 'delete', 'project', id, removed.name);
+  ok(res, { deleted: true });
+});
+
+/* ---------------- Listing reports ---------------- */
+
+adminRouter.get('/reports', async (req, res) => {
+  const { items, meta } = await reports.listReports(parseQuery(adminReportQuerySchema, req));
+  ok(res, items, meta);
+});
+
+adminRouter.patch('/reports/:id', requireRole('editor'), async (req, res) => {
+  const id = parseId(req);
+  const { status, note } = parseBody(reportUpdateSchema, req);
+  const r = await reports.updateReport(id, status, req.admin!.email, note);
+  await audit(req.admin, `report:${status}`, 'report', id, r.property?.title ?? '');
+  ok(res, r);
 });
 
 /* ---------------- Uploads ---------------- */

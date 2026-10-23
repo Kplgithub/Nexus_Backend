@@ -13,6 +13,9 @@ import {
   PARKING_OPTIONS,
   POSSESSION_STATUSES,
   POSTER_TYPES,
+  PG_GENDERS,
+  PG_SHARING,
+  PLOT_APPROVALS,
   PREFERRED_TENANTS,
   PROPERTY_STATUSES,
   TRANSACTION_TYPES,
@@ -107,6 +110,26 @@ const propertySchema = new Schema(
     images: { type: [imageSchema], default: [] },
     coverImageIndex: { type: Number, default: 0, min: 0 },
 
+    /** GeoJSON point (lng, lat order) for the map and "near me" search. */
+    geo: {
+      type: { type: String, enum: ['Point'] },
+      coordinates: { type: [Number], default: undefined },
+    },
+    videoUrl: { type: String, maxlength: 200 },
+    projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
+
+    plotApproval: { type: String, enum: [...PLOT_APPROVALS, null], default: null },
+    cornerPlot: { type: Boolean, default: false },
+    roadWidthFt: { type: Number, min: 0, max: 300, default: null },
+    openSides: { type: Number, min: 1, max: 4, default: null },
+    boundaryWall: { type: Boolean, default: false },
+
+    pgSharing: { type: [String], enum: PG_SHARING, default: [] },
+    pgGender: { type: String, enum: [...PG_GENDERS, null], default: null },
+    pgFoodIncluded: { type: Boolean, default: false },
+
+    views: { type: Number, default: 0 },
+
     featured: { type: Boolean, default: false },
     /** Checked by the NEXUS team (site visit / documents). Shown as a badge. */
     verified: { type: Boolean, default: false },
@@ -158,6 +181,9 @@ propertySchema.index({ status: 1, featured: 1, publishedAt: -1 });
 propertySchema.index({ postedBy: 1, status: 1, updatedAt: -1 });
 propertySchema.index({ status: 1, submittedAt: 1 });
 propertySchema.index({ isDemo: 1 });
+propertySchema.index({ geo: '2dsphere' }, { sparse: true });
+propertySchema.index({ projectId: 1, status: 1 });
+propertySchema.index({ postedBy: 1, status: 1, listingVisibility: 1, publishedAt: -1 });
 propertySchema.index({ updatedAt: -1 });
 propertySchema.index(
   { title: 'text', localityName: 'text', projectName: 'text', description: 'text' },
