@@ -1,0 +1,29 @@
+{
+  "name": "nexus-estate-backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NEXUS Estate — REST API (Express + MongoDB) and the shared types/validation package",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @nexus/shared build && pnpm --filter @nexus/api build",
+    "dev": "pnpm --filter @nexus/shared build && pnpm --filter @nexus/api dev",
+    "start": "pnpm --filter @nexus/api start",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm --filter @nexus/shared build && pnpm -r typecheck",
+    "test": "pnpm --filter @nexus/shared build && pnpm -r test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "seed:admin": "pnpm --filter @nexus/api seed:admin",
+    "seed:base": "pnpm --filter @nexus/api seed:base",
+    "seed:locations": "pnpm --filter @nexus/api seed:locations",
+    "seed:demo": "pnpm --filter @nexus/api seed:demo",
+    "demo:remove": "pnpm --filter @nexus/api demo:remove"
+  },
+  "devDependencies": {
+    "prettier": "3.8.1",
+    "typescript": "^5.9.0"
+  }
+}

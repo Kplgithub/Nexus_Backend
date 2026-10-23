@@ -1,0 +1,47 @@
+name: Deploy
+
+# Deploys this backend (with the current website code) to the production server over SSH.
+# The server keeps both repositories; the deploy script lives in the website repo (Kplgithub/Nexus).
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (private key of the server's deploy user), DEPLOY_PATH (e.g. /srv/nexus)
+# Optional: DEPLOY_KNOWN_HOSTS (output of `ssh-keyscan <host>`). App secrets live on the server only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Backend ref to deploy (branch, tag or SHA)
+        default: main
+        required: true
+      web_ref:
+        description: Website ref to deploy alongside it
+        default: main
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - name: Configure SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          if [ -n "$KNOWN" ]; then printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts; else ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts; fi
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          REF: ${{ inputs.ref }}
+          WEB_REF: ${{ inputs.web_ref }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" "cd '$DEPLOY_PATH' && ./deploy/scripts/deploy.sh '$WEB_REF' '$REF'"

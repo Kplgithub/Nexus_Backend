@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  checks:
+    name: Lint, typecheck, API tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: |
+          if ! scripts/ci-run.sh "Install" pnpm install --frozen-lockfile; then
+            pnpm install --no-frozen-lockfile >/dev/null 2>&1 || true
+            echo "::error title=Lockfile::pnpm-lock.yaml is out of date. An updated one is attached as the 'pnpm-lock' artifact."
+            exit 1
+          fi
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-lock
+          path: pnpm-lock.yaml
+          retention-days: 3
+      - name: Build shared package
+        run: scripts/ci-run.sh "Build shared" pnpm --filter @nexus/shared build
+      - name: Format check
+        run: scripts/ci-run.sh "Format check" pnpm format:check
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: scripts/ci-run.sh "Lint" pnpm -r --no-bail lint
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: scripts/ci-run.sh "Typecheck" pnpm -r --no-bail typecheck
+      - name: Unit and API tests (in-memory MongoDB)
+        if: ${{ !cancelled() }}
+        run: scripts/ci-run.sh "Tests" pnpm -r --no-bail test
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: scripts/ci-run.sh "Build" pnpm --filter @nexus/api build
+
+  docker:
+    name: Production image (API + MongoDB 7)
+    runs-on: ubuntu-latest
+    needs: checks
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: scripts/ci-run.sh "Docker build" docker build -f apps/api/Dockerfile -t nexus-api:ci .
+      - name: Start MongoDB and the API
+        run: |
+          docker network create nexus
+          docker run -d --name mongo --network nexus -e MONGO_INITDB_ROOT_USERNAME=nexus -e MONGO_INITDB_ROOT_PASSWORD=ci-only mongo:7.0 --auth
+          docker run -d --name api --network nexus -p 127.0.0.1:4000:4000 \
+            -e NODE_ENV=production -e PORT=4000 -e TRUST_PROXY=1 \
+            -e MONGODB_URI='mongodb://nexus:ci-only@mongo:27017/nexus?authSource=admin' \
+            -e CORS_ORIGINS=https://nexus.example.com -e PUBLIC_SITE_URL=https://nexus.example.com \
+            -e JWT_SECRET=ci-only-secret-ci-only-secret-ci-only-secret -e COOKIE_SECURE=true \
+            -e UPLOAD_DRIVER=cloudinary -e CLOUDINARY_CLOUD_NAME=ci -e CLOUDINARY_API_KEY=ci -e CLOUDINARY_API_SECRET=ci \
+            nexus-api:ci
+          for i in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:4000/api/v1/health | grep -q '"db":"up"' && exit 0
+            sleep 3
+          done
+          scripts/ci-run.sh "API start" bash -c "docker logs --tail 80 api; docker logs --tail 20 mongo; exit 1"
+      - name: Seed and smoke-test
+        run: |
+          docker exec api node dist/scripts/seed-base.js
+          docker exec api node dist/scripts/seed-locations.js
+          docker exec api node dist/scripts/sync-indexes.js
+          curl -fsS http://127.0.0.1:4000/api/v1/locations | grep -q '"slug":"jaipur"'
+          curl -fsS http://127.0.0.1:4000/api/v1/auth/config
+      - if: failure()
+        run: docker logs --tail 120 api
