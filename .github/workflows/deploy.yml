@@ -43,13 +43,13 @@ jobs:
             pnpm build
 
             echo 'Syncing database indexes...'
-            node apps/api/dist/scripts/sync-indexes.js
+            node --env-file=apps/api/.env apps/api/dist/scripts/sync-indexes.js
 
             echo 'Restarting nexus-api process...'
             pm2 restart nexus-api
 
             echo 'Waiting for API health check...'
-            sleep 2
+            sleep 3
             curl -fsS http://127.0.0.1:4000/api/v1/health
             echo 'Backend deployment successful!'
           "
