@@ -1,6 +1,6 @@
 /**
  * Inserts clearly-labelled DEMO listings for testing. Every record has
- * isDemo=true, a "Demo listing" badge on the site, demo illustrations, and is
+ * isDemo=true, a "Demo listing" badge on the site, free sample photos, and is
  * removed by `pnpm demo:remove`. Never run this on the production database
  * after launch.
  */
@@ -24,14 +24,72 @@ import { Types } from 'mongoose';
 
 const NOTE =
   'DEMO LISTING — created for testing only. This is not a real, currently available NEXUS property.';
-const img = (file: string, alt: string) => ({
-  url: `/demo/${file}.jpg`,
-  publicId: `demo/${file}`,
-  alt,
-  isDemo: true,
-  width: 1600,
-  height: 1067,
-});
+/**
+ * Free photos for demo listings (Unsplash License: free for commercial use,
+ * no attribution required), served from Unsplash's CDN. Each kind has a few
+ * photos that rotate so listings don't all look the same.
+ */
+const PHOTOS: Record<string, string[]> = {
+  'apartment-exterior': [
+    '1545324418-cc1a3fa10c00',
+    '1515263487990-61b07816b324',
+    '1580216643062-cf460548a66a',
+    '1573132223210-d65883b944aa',
+    '1624204386084-dd8c05e32226',
+  ],
+  'villa-exterior': ['1613490493576-7fde63acd811', '1580587771525-78b9dba3b914'],
+  'house-exterior': ['1600596542815-ffad4c1539a9', '1628012209120-d9db7abf7eab'],
+  'living-room': [
+    '1583847268964-b28dc8f51f92',
+    '1618221195710-dd6b41faaea6',
+    '1631679706909-1844bbd07221',
+    '1616047006789-b7af5afb8c20',
+    '1628592102751-ba83b0314276',
+  ],
+  bedroom: [
+    '1616594039964-ae9021a400a0',
+    '1615874959474-d609969a20ed',
+    '1616486029423-aaa4789e8c9a',
+    '1560185893-a55cbc8c57e8',
+    '1595526114035-0d45ed16cfbf',
+  ],
+  kitchen: [
+    '1600489000022-c2086d79f9d4',
+    '1556911220-bff31c812dba',
+    '1617228069096-4638a7ffc906',
+    '1484154218962-a197022b5858',
+  ],
+  'office-interior': [
+    '1497366811353-6870744d04b2',
+    '1497366754035-f200968a6e72',
+    '1497215728101-856f4ea42174',
+  ],
+  coworking: [
+    '1527192491265-7e15c55b1ed2',
+    '1604328727766-a151d1045ab4',
+    '1600508774634-4e11d34730e2',
+  ],
+  'shop-front': ['1441986300917-64674bd600d8', '1472851294608-062f824d29cc'],
+  showroom: ['1481437156560-3205f6a55735', '1441986300917-64674bd600d8'],
+  plot: ['1655319446878-44e5c1e31551', '1637555754372-54538a035312'],
+};
+const used = new Map<string, number>();
+const img = (file: string, alt: string) => {
+  const pool = PHOTOS[file];
+  const n = used.get(file) ?? 0;
+  used.set(file, n + 1);
+  const id = pool?.[n % pool.length];
+  return {
+    url: id
+      ? `https://images.unsplash.com/photo-${id}?w=1600&h=1067&fit=crop&q=80&auto=format`
+      : `/demo/${file}.jpg`,
+    publicId: `demo/${file}-${n}`,
+    alt,
+    isDemo: true,
+    width: 1600,
+    height: 1067,
+  };
+};
 
 type Demo = PropertyCreateInput & { poster?: 'owner' | 'agent' | 'builder' };
 
@@ -506,7 +564,7 @@ saleDemos.push({
   roadWidthFt: 40,
   openSides: 2,
   boundaryWall: true,
-  images: [img('house-exterior', 'Plot and surroundings')],
+  images: [img('plot', 'Plot and surroundings')],
 });
 
 const DEMO_PROJECT: Omit<ProjectCreateInput, 'status'> = {
