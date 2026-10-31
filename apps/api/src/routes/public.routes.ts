@@ -11,6 +11,7 @@ import {
   propertySearchSchema,
   projectSearchSchema,
   reportCreateSchema,
+  blogSearchSchema,
   type CategoryInfo,
 } from '@nexus/shared';
 import { z } from 'zod';
@@ -28,6 +29,7 @@ import * as projects from '../services/project.service.js';
 import * as profiles from '../services/profile.service.js';
 import * as reports from '../services/report.service.js';
 import * as leads from '../services/enquiry.service.js';
+import * as blog from '../services/blog.service.js';
 import { getPublicSettings } from '../services/settings.service.js';
 
 export const publicRouter: RouterType = Router();
@@ -145,6 +147,29 @@ publicRouter.post('/reports', limiters.publicForm, optionalUser, async (req, res
   await reports.createReport(input, { ipHash: hashIp(req.ip) }, req.user);
   res.set('Cache-Control', 'no-store');
   created(res, { received: true });
+});
+
+/* ---------------- Blog ---------------- */
+
+publicRouter.get('/blog', async (req, res) => {
+  const { items, meta } = await blog.listPublic(parseQuery(blogSearchSchema, req));
+  cache(res);
+  ok(res, items, meta);
+});
+
+publicRouter.get('/blog/:slug', async (req, res) => {
+  const slug = String(req.params.slug).toLowerCase();
+  if (!SLUG_PATTERN.test(slug) || slug.length > 100) throw notFound('Article not found');
+  const result = await blog.getPublicBySlug(slug);
+  cache(res);
+  // The web app turns this into a permanent (308) redirect.
+  if (result.kind === 'redirect') return ok(res, { redirectTo: result.slug });
+  ok(res, { post: result.post, related: result.related });
+});
+
+publicRouter.get('/sitemap/blog', async (_req, res) => {
+  cache(res, 300);
+  ok(res, await blog.sitemapBlog());
 });
 
 publicRouter.get('/sitemap/properties', async (_req, res) => {

@@ -1,5 +1,7 @@
 import type {
   AdminRole,
+  BlogCategory,
+  BlogStatus,
   Amenity,
   AreaType,
   AreaUnit,
@@ -530,3 +532,39 @@ export type CategoryInfo = {
 };
 
 export type { SortOption };
+
+/* ---------------- Blog ---------------- */
+
+export type BlogCover = {
+  url: string;
+  publicId?: string;
+  alt: string;
+  width?: number;
+  height?: number;
+};
+
+export type BlogPostCard = {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  coverImage: BlogCover | null;
+  category: BlogCategory;
+  tags: string[];
+  authorName: string;
+  featured: boolean;
+  readingMinutes: number;
+  publishedAt: string | null;
+  updatedAt: string;
+};
+
+export type PublicBlogPost = BlogPostCard & {
+  content: string;
+  seoTitle?: string;
+  seoDescription?: string;
+};
+
+export type AdminBlogPost = PublicBlogPost & {
+  status: BlogStatus;
+  createdAt: string;
+};

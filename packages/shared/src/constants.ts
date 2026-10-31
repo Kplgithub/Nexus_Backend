@@ -472,3 +472,33 @@ export const MAX_MONEY_INR = 10_000_000_000;
 export const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 export const IMAGE_MAX_PER_PROPERTY = 30;
 export const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'] as const;
+
+/* ---------------- Blog ---------------- */
+export const BLOG_STATUSES = ['draft', 'published'] as const;
+export type BlogStatus = (typeof BLOG_STATUSES)[number];
+
+export const BLOG_CATEGORIES = [
+  'buying',
+  'renting',
+  'investment',
+  'home-loans',
+  'legal',
+  'localities',
+  'interiors',
+  'news',
+] as const;
+export type BlogCategory = (typeof BLOG_CATEGORIES)[number];
+
+export const BLOG_CATEGORY_LABELS: Record<BlogCategory, string> = {
+  buying: 'Buying guide',
+  renting: 'Renting guide',
+  investment: 'Investment',
+  'home-loans': 'Home loans',
+  legal: 'Legal and RERA',
+  localities: 'Locality guides',
+  interiors: 'Interiors and Vastu',
+  news: 'Market news',
+};
+
+/** Slugs the blog uses for its own pages, so no post can take them. */
+export const BLOG_RESERVED_SLUGS = ['category', 'tag', 'page', 'feed', 'rss'] as const;
