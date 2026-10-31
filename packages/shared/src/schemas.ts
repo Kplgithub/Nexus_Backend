@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   ALL_PROPERTY_TYPES,
+  BLOG_CATEGORIES,
+  BLOG_STATUSES,
   AMENITIES,
   AREA_TYPES,
   AREA_UNITS,
@@ -928,4 +930,72 @@ export const adminProjectQuerySchema = z.object({
 export const imageReorderSchema = z.object({
   images: z.array(propertyImageSchema).max(30),
   coverImageIndex: z.number().int().min(0).default(0),
+});
+
+/* ------------------------------------------------------------------ */
+/* Blog                                                                */
+/* ------------------------------------------------------------------ */
+
+export const blogCoverSchema = z.object({
+  url: imageUrl,
+  publicId: z.string().max(300).optional(),
+  alt: plainText(0, 160).default(''),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+});
+
+export const blogPostCreateSchema = z.object({
+  title: plainText(5, 140),
+  slug: slug.optional(),
+  /** Short summary shown on cards and used as the meta description when none is set. */
+  excerpt: plainText(0, 300).default(''),
+  /**
+   * Markdown. Raw HTML is never rendered by the website, so angle brackets are kept
+   * (they are needed for quotes and comparisons) without any risk of markup injection.
+   */
+  content: z.string().trim().min(20, 'Write at least a few lines').max(100_000),
+  coverImage: blogCoverSchema.nullable().default(null),
+  category: z.enum(BLOG_CATEGORIES).default('buying'),
+  tags: z
+    .array(
+      z
+        .string()
+        .trim()
+        .toLowerCase()
+        .min(2)
+        .max(40)
+        .transform((s) => s.replace(/[<>]/g, '')),
+    )
+    .max(10)
+    .default([])
+    .transform((t) => [...new Set(t)]),
+  authorName: plainText(0, 80).default(''),
+  status: z.enum(BLOG_STATUSES).default('draft'),
+  featured: z.boolean().default(false),
+  seoTitle: plainText(0, 70).optional(),
+  seoDescription: plainText(0, 170).optional(),
+});
+export const blogPostUpdateSchema = blogPostCreateSchema.partial().strict();
+export type BlogPostInput = z.output<typeof blogPostCreateSchema>;
+
+export const blogSearchSchema = z.object({
+  category: queryEnum(BLOG_CATEGORIES),
+  tag: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.trim().toLowerCase().slice(0, 40) || undefined : undefined)),
+  page: queryNumber(1, 1000).transform((v) => v ?? 1),
+  limit: queryNumber(1, PAGE_SIZE_MAX).transform((v) => v ?? PAGE_SIZE_DEFAULT),
+});
+export type BlogSearch = z.output<typeof blogSearchSchema>;
+
+export const adminBlogQuerySchema = z.object({
+  status: queryEnum(BLOG_STATUSES),
+  category: queryEnum(BLOG_CATEGORIES),
+  q: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.trim().slice(0, 80) || undefined : undefined)),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 20),
 });

@@ -22,6 +22,9 @@ import {
   projectStatusChangeSchema,
   adminReportQuerySchema,
   reportUpdateSchema,
+  adminBlogQuerySchema,
+  blogPostCreateSchema,
+  blogPostUpdateSchema,
 } from '@nexus/shared';
 import { clearSession, issueSession, requireAuth, requireRole } from '../middleware/auth.js';
 import { limiters } from '../middleware/security.js';
@@ -40,6 +43,7 @@ import { audit } from '../services/support.service.js';
 import * as adminUsers from '../services/admin-users.service.js';
 import * as projects from '../services/project.service.js';
 import * as reports from '../services/report.service.js';
+import * as blog from '../services/blog.service.js';
 
 export const adminRouter: RouterType = Router();
 
@@ -322,6 +326,49 @@ adminRouter.patch('/faqs/:id', requireRole('editor'), async (req, res) => {
 });
 adminRouter.delete('/faqs/:id', requireRole('editor'), async (req, res) => {
   await faqs.deleteFaq(parseId(req));
+  ok(res, { deleted: true });
+});
+
+/* ---------------- Blog ---------------- */
+
+adminRouter.get('/blog', async (req, res) => {
+  const { items, meta } = await blog.listAdmin(parseQuery(adminBlogQuerySchema, req));
+  ok(res, items, meta);
+});
+
+adminRouter.get('/blog/:id', async (req, res) => ok(res, await blog.getAdmin(parseId(req))));
+
+adminRouter.post('/blog', requireRole('editor'), async (req, res) => {
+  const post = await blog.createPost(parseBody(blogPostCreateSchema, req), req.admin!.id);
+  await audit(
+    req.admin,
+    post.status === 'published' ? 'publish' : 'create',
+    'blog',
+    post.id,
+    post.title,
+  );
+  created(res, post);
+});
+
+adminRouter.patch('/blog/:id', requireRole('editor'), async (req, res) => {
+  const id = parseId(req);
+  const patch = onlySentKeys(parseBody(blogPostUpdateSchema, req), req.body);
+  if (!Object.keys(patch).length) throw badRequest('Nothing to update');
+  const post = await blog.updatePost(id, patch, req.admin!.id);
+  await audit(
+    req.admin,
+    patch.status ? `status:${patch.status}` : 'update',
+    'blog',
+    id,
+    post.title,
+  );
+  ok(res, post);
+});
+
+adminRouter.delete('/blog/:id', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const removed = await blog.deletePost(id);
+  await audit(req.admin, 'delete', 'blog', id, removed.title);
   ok(res, { deleted: true });
 });
 

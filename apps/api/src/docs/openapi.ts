@@ -258,6 +258,27 @@ export const openApiDocument = {
         responses: { '200': { description: 'OK' } },
       },
     },
+    '/blog': {
+      get: {
+        tags: ['Public'],
+        summary: 'Published blog articles (newest first)',
+        parameters: [
+          q('category', { type: 'string' }),
+          q('tag', { type: 'string' }),
+          q('page', { type: 'integer' }),
+          q('limit', { type: 'integer' }),
+        ],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/blog/{slug}': {
+      get: {
+        tags: ['Public'],
+        summary: 'One published article with related posts, or { redirectTo } for an old slug',
+        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } },
+      },
+    },
     '/faqs': {
       get: {
         tags: ['Public'],
@@ -707,6 +728,39 @@ export const openApiDocument = {
       delete: {
         ...admin,
         summary: 'Delete city without listings',
+        parameters: [idParam],
+        responses: { '200': { description: 'OK' }, ...authErrors },
+      },
+    },
+    '/admin/blog': {
+      get: {
+        ...admin,
+        summary: 'Blog articles (drafts and published)',
+        parameters: [q('status', { type: 'string' }), q('q', { type: 'string' })],
+        responses: { '200': { description: 'OK' }, ...authErrors },
+      },
+      post: {
+        ...admin,
+        summary: 'Create a blog article (editor+)',
+        responses: { '201': { description: 'Created' }, ...authErrors, ...errors },
+      },
+    },
+    '/admin/blog/{id}': {
+      get: {
+        ...admin,
+        summary: 'One blog article',
+        parameters: [idParam],
+        responses: { '200': { description: 'OK' }, ...authErrors },
+      },
+      patch: {
+        ...admin,
+        summary: 'Update, publish or unpublish an article (editor+)',
+        parameters: [idParam],
+        responses: { '200': { description: 'OK' }, ...authErrors, ...errors },
+      },
+      delete: {
+        ...admin,
+        summary: 'Delete an article (admin+)',
         parameters: [idParam],
         responses: { '200': { description: 'OK' }, ...authErrors },
       },
