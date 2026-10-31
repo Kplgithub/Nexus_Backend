@@ -45,6 +45,9 @@ jobs:
             echo 'Syncing database indexes...'
             node --env-file=apps/api/.env apps/api/dist/scripts/sync-indexes.js
 
+            echo 'Adding keyword copy to empty location pages...'
+            node --env-file=apps/api/.env apps/api/dist/scripts/apply-seo.js || echo 'seo:apply failed, continuing'
+
             echo 'Restarting nexus-api process...'
             pm2 restart nexus-api
 

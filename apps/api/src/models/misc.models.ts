@@ -94,6 +94,17 @@ const pointSchema = new Schema(
   { _id: false },
 );
 
+/** Buy or Rent page copy for a city or locality; see dealSeoSchema in @nexus/shared. */
+const dealSeoSchema = new Schema(
+  {
+    title: { type: String, maxlength: 70 },
+    description: { type: String, maxlength: 170 },
+    h1: { type: String, maxlength: 90 },
+    intro: { type: String, maxlength: 3000 },
+  },
+  { _id: false },
+);
+
 const localitySchema = new Schema(
   {
     name: { type: String, required: true, maxlength: 80 },
@@ -102,6 +113,8 @@ const localitySchema = new Schema(
     intro: { type: String, default: '', maxlength: 3000 },
     seoTitle: { type: String, maxlength: 70 },
     seoDescription: { type: String, maxlength: 170 },
+    buySeo: { type: dealSeoSchema, default: undefined },
+    rentSeo: { type: dealSeoSchema, default: undefined },
     center: { type: pointSchema, default: null },
     highlights: { type: [String], default: [] },
     landmarks: {
@@ -131,6 +144,8 @@ const citySchema = new Schema(
     intro: { type: String, default: '', maxlength: 4000 },
     seoTitle: { type: String, maxlength: 70 },
     seoDescription: { type: String, maxlength: 170 },
+    buySeo: { type: dealSeoSchema, default: undefined },
+    rentSeo: { type: dealSeoSchema, default: undefined },
     localities: { type: [localitySchema], default: [] },
   },
   { timestamps: true },

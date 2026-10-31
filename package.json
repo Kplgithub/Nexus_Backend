@@ -20,7 +20,8 @@
     "seed:base": "pnpm --filter @nexus/api seed:base",
     "seed:locations": "pnpm --filter @nexus/api seed:locations",
     "seed:demo": "pnpm --filter @nexus/api seed:demo",
-    "demo:remove": "pnpm --filter @nexus/api demo:remove"
+    "demo:remove": "pnpm --filter @nexus/api demo:remove",
+    "seo:apply": "pnpm --filter @nexus/api seo:apply"
   },
   "devDependencies": {
     "prettier": "3.8.1",
