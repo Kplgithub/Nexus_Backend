@@ -49,7 +49,10 @@ jobs:
             pm2 restart nexus-api
 
             echo 'Waiting for API health check...'
-            sleep 3
-            curl -fsS http://127.0.0.1:4000/api/v1/health
+            for i in \$(seq 1 30); do
+              curl -fsS http://127.0.0.1:4000/api/v1/health && break
+              [ \$i -eq 30 ] && { pm2 logs nexus-api --lines 50 --nostream; exit 1; }
+              sleep 2
+            done
             echo 'Backend deployment successful!'
           "
