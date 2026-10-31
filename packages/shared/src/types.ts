@@ -199,6 +199,14 @@ export type AdminProperty = OwnListing & {
   poster: ListingPoster;
 };
 
+/** Search copy for the Buy or Rent page of a city or locality. */
+export type DealSeo = {
+  title?: string;
+  description?: string;
+  h1?: string;
+  intro?: string;
+};
+
 export type Locality = {
   name: string;
   slug: string;
@@ -206,6 +214,8 @@ export type Locality = {
   intro: string;
   seoTitle?: string;
   seoDescription?: string;
+  buySeo?: DealSeo;
+  rentSeo?: DealSeo;
   publishedCount?: number;
   center?: GeoPointValue | null;
   highlights?: string[];
@@ -244,6 +254,8 @@ export type City = {
   intro: string;
   seoTitle?: string;
   seoDescription?: string;
+  buySeo?: DealSeo;
+  rentSeo?: DealSeo;
   localities: Locality[];
   publishedCount?: number;
 };

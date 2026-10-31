@@ -2,6 +2,7 @@ import {
   median,
   slugify,
   type City as CityDto,
+  type DealSeo,
   type LandmarkKind,
   type LocalityInsights,
   type PropertyType,
@@ -13,6 +14,13 @@ import { badRequest, conflict, notFound } from '../lib/errors.js';
 import type { z } from 'zod';
 import type { cityCreateSchema, cityUpdateSchema } from '@nexus/shared';
 
+type DealSeoLean = {
+  title?: string | null;
+  description?: string | null;
+  h1?: string | null;
+  intro?: string | null;
+} | null;
+
 type CityLean = {
   _id: unknown;
   name: string;
@@ -23,6 +31,8 @@ type CityLean = {
   intro: string;
   seoTitle?: string | null;
   seoDescription?: string | null;
+  buySeo?: DealSeoLean;
+  rentSeo?: DealSeoLean;
   localities: {
     name: string;
     slug: string;
@@ -30,6 +40,8 @@ type CityLean = {
     intro: string;
     seoTitle?: string | null;
     seoDescription?: string | null;
+    buySeo?: DealSeoLean;
+    rentSeo?: DealSeoLean;
     center?: { lat: number; lng: number } | null;
     highlights?: string[];
     landmarks?: {
@@ -39,6 +51,17 @@ type CityLean = {
     }[];
   }[];
 };
+
+/** Only the filled-in fields; {} for a page an editor cleared, undefined if never set. */
+function dealSeo(s?: DealSeoLean): DealSeo | undefined {
+  if (!s) return undefined;
+  const out: DealSeo = {};
+  for (const k of ['title', 'description', 'h1', 'intro'] as const) {
+    const v = s[k]?.trim();
+    if (v) out[k] = v;
+  }
+  return out;
+}
 
 const point = (p?: { lat: number; lng: number } | null) => (p ? { lat: p.lat, lng: p.lng } : null);
 
@@ -53,6 +76,8 @@ function toDto(c: CityLean, counts?: Map<string, number>): CityDto {
     intro: c.intro,
     seoTitle: c.seoTitle ?? undefined,
     seoDescription: c.seoDescription ?? undefined,
+    buySeo: dealSeo(c.buySeo),
+    rentSeo: dealSeo(c.rentSeo),
     publishedCount: counts?.get(c.slug) ?? undefined,
     localities: c.localities.map((l) => ({
       name: l.name,
@@ -61,6 +86,8 @@ function toDto(c: CityLean, counts?: Map<string, number>): CityDto {
       intro: l.intro,
       seoTitle: l.seoTitle ?? undefined,
       seoDescription: l.seoDescription ?? undefined,
+      buySeo: dealSeo(l.buySeo),
+      rentSeo: dealSeo(l.rentSeo),
       publishedCount: counts?.get(`${c.slug}/${l.slug}`) ?? undefined,
       center: point(l.center),
       highlights: l.highlights ?? [],

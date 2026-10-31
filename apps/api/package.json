@@ -17,6 +17,7 @@
     "seed:locations": "tsx --env-file-if-exists=.env src/scripts/seed-locations.ts",
     "seed:demo": "tsx --env-file-if-exists=.env src/scripts/seed-demo.ts",
     "demo:remove": "tsx --env-file-if-exists=.env src/scripts/remove-demo.ts",
+    "seo:apply": "tsx --env-file-if-exists=.env src/scripts/apply-seo.ts",
     "db:indexes": "tsx --env-file-if-exists=.env src/scripts/sync-indexes.ts"
   },
   "dependencies": {

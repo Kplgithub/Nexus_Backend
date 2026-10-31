@@ -673,6 +673,18 @@ export const adminUserUpdateSchema = z
 /* Locations, FAQs, settings                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Search copy for one deal type of a location page (Buy or Rent), so
+ * /buy/jaipur and /rent/jaipur can each target their own keywords.
+ * Empty fields fall back to the shared SEO fields and the built-in defaults.
+ */
+export const dealSeoSchema = z.object({
+  title: plainText(0, 70).optional(),
+  description: plainText(0, 170).optional(),
+  h1: plainText(0, 90).optional(),
+  intro: plainText(0, 3000).optional(),
+});
+
 export const localitySchema = z.object({
   name: plainText(2, 80),
   slug: slug.optional(),
@@ -681,6 +693,8 @@ export const localitySchema = z.object({
   intro: plainText(0, 3000).default(''),
   seoTitle: plainText(0, 70).optional(),
   seoDescription: plainText(0, 170).optional(),
+  buySeo: dealSeoSchema.optional(),
+  rentSeo: dealSeoSchema.optional(),
   /** Map centre for the locality page. */
   center: geoPointSchema.nullable().optional(),
   /** Short points for the locality page, e.g. "10 min to Ajmer Road". */
@@ -707,6 +721,8 @@ export const cityCreateSchema = z.object({
   intro: plainText(0, 4000).default(''),
   seoTitle: plainText(0, 70).optional(),
   seoDescription: plainText(0, 170).optional(),
+  buySeo: dealSeoSchema.optional(),
+  rentSeo: dealSeoSchema.optional(),
   localities: z.array(localitySchema).max(300).default([]),
 });
 export const cityUpdateSchema = cityCreateSchema.partial().strict();
