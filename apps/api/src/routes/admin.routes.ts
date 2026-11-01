@@ -44,6 +44,7 @@ import * as adminUsers from '../services/admin-users.service.js';
 import * as projects from '../services/project.service.js';
 import * as reports from '../services/report.service.js';
 import * as blog from '../services/blog.service.js';
+import { importProperties, importTemplateCsv } from '../services/property-import.service.js';
 
 export const adminRouter: RouterType = Router();
 
@@ -106,6 +107,43 @@ adminRouter.get('/properties', async (req, res) => {
   const { items, meta } = await properties.listAdmin(parseQuery(adminPropertyQuerySchema, req));
   ok(res, items, meta);
 });
+
+// Bulk import from a broker's or owner's sheet. Rows become drafts; photos are added in the editor.
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024, files: 1, fields: 2 },
+});
+
+adminRouter.get('/properties/import/template', (_req, res) => {
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="nexus-listings-template.csv"');
+  res.send(importTemplateCsv());
+});
+
+adminRouter.post(
+  '/properties/import',
+  limiters.upload,
+  requireRole('editor'),
+  csvUpload.single('file'),
+  async (req, res) => {
+    const file = req.file;
+    if (!file?.buffer.length) throw badRequest('Choose a CSV file');
+    const text = file.buffer.toString('utf8');
+    if (text.includes('\u0000')) throw badRequest('Save the sheet as CSV (UTF-8) and upload that');
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const result = await importProperties(text, { dryRun, adminId: req.admin!.id });
+    if (!dryRun && result.created) {
+      await audit(
+        req.admin,
+        'import',
+        'property',
+        undefined,
+        `${result.created} draft(s) from ${file.originalname}`,
+      );
+    }
+    ok(res, result);
+  },
+);
 
 adminRouter.get('/properties/:id', async (req, res) =>
   ok(res, await properties.getAdmin(parseId(req))),

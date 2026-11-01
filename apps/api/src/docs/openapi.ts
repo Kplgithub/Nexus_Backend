@@ -603,6 +603,22 @@ export const openApiDocument = {
         responses: { '201': { description: 'Created' }, ...authErrors, ...errors },
       },
     },
+    '/admin/properties/import/template': {
+      get: {
+        ...admin,
+        summary: 'Download the CSV template for bulk import',
+        responses: { '200': { description: 'CSV file' }, ...authErrors },
+      },
+    },
+    '/admin/properties/import': {
+      post: {
+        ...admin,
+        summary:
+          'Bulk import listings from a CSV (multipart field "file", max 200 rows). Valid rows become drafts; ?dryRun=1 only checks.',
+        parameters: [q('dryRun', { type: 'string' })],
+        responses: { '200': { description: 'Per-row results' }, ...authErrors, ...errors },
+      },
+    },
     '/admin/properties/{id}': {
       get: {
         ...admin,
