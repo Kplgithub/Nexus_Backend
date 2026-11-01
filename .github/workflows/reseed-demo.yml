@@ -1,0 +1,50 @@
+name: Reseed demo listings
+
+# Manual only. Replaces the demo listings on the server with fresh ones that use
+# the current sample photos (Unsplash, labelled "Demo listing" on the site).
+# Real listings are never touched: only records with isDemo=true are removed.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RESEED to replace the demo listings'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  reseed:
+    if: ${{ inputs.confirm == 'RESEED' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Remove and reseed demo listings
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" "
+            export PATH=\$PATH:/usr/bin:/usr/local/bin
+            set -euo pipefail
+            cd '$DEPLOY_PATH'
+            echo 'Removing old demo listings...'
+            node --env-file=apps/api/.env apps/api/dist/scripts/remove-demo.js
+            echo 'Inserting fresh demo listings...'
+            node --env-file=apps/api/.env apps/api/dist/scripts/seed-demo.js
+            echo 'Done.'
+          "
