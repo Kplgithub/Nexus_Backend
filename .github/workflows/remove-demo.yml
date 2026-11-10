@@ -1,0 +1,42 @@
+name: Remove demo listings
+
+# Manual only. Deletes every demo listing, the demo project, the demo poster
+# accounts and their enquiries from the server (records with isDemo=true).
+# Real listings are never touched. Run "Reseed demo listings" to bring them back.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type REMOVE to delete the demo listings'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  remove:
+    if: ${{ inputs.confirm == 'REMOVE' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Remove demo listings
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" "
+            export PATH=\$PATH:/usr/bin:/usr/local/bin
+            set -euo pipefail
+            cd '$DEPLOY_PATH'
+            node --env-file=apps/api/.env apps/api/dist/scripts/remove-demo.js
+          "
