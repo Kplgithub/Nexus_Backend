@@ -579,4 +579,81 @@ export type PublicBlogPost = BlogPostCard & {
 export type AdminBlogPost = PublicBlogPost & {
   status: BlogStatus;
   createdAt: string;
+  /** All-time reader numbers; only on the admin list. */
+  stats?: BlogReadStats;
+};
+
+/* ---------------- Blog reader analytics ---------------- */
+
+export type BlogReadStats = {
+  /** Article opens (one per reader per browser tab session). */
+  views: number;
+  /** Distinct browsers that opened the article. */
+  readers: number;
+  /** Total active reading time, in seconds (only while the tab is visible and the reader is active). */
+  totalSeconds: number;
+  /** Average active reading time per view, in seconds. */
+  avgSeconds: number;
+  /** Views that scrolled to the end of the article. */
+  completed: number;
+  /** completed / views, 0-100. */
+  completionRate: number;
+};
+
+export type BlogAnalyticsDay = {
+  /** YYYY-MM-DD, India time. */
+  date: string;
+  views: number;
+  readers: number;
+  avgSeconds: number;
+};
+
+export type BlogAnalyticsRange = { days: number; from: string; to: string };
+
+export type BlogAnalyticsCount = { label: string; count: number };
+
+export type BlogAnalyticsPostRow = BlogReadStats & {
+  id: string;
+  title: string;
+  slug: string;
+  status: BlogStatus;
+  publishedAt: string | null;
+};
+
+export type BlogAnalyticsOverview = {
+  range: BlogAnalyticsRange;
+  totals: BlogReadStats;
+  daily: BlogAnalyticsDay[];
+  posts: BlogAnalyticsPostRow[];
+};
+
+export type BlogRecentRead = {
+  at: string;
+  seconds: number;
+  scroll: number;
+  device: string;
+  source: string;
+  returning: boolean;
+};
+
+export type BlogPostAnalytics = {
+  post: { id: string; title: string; slug: string; status: BlogStatus; readingMinutes: number };
+  range: BlogAnalyticsRange;
+  totals: BlogReadStats & {
+    /** Views with at least 30 seconds of reading. */
+    engaged: number;
+    /** Views that left within 10 seconds. */
+    quickExits: number;
+    /** Readers who had read a NEXUS article before. */
+    returningReaders: number;
+  };
+  allTime: BlogReadStats;
+  daily: BlogAnalyticsDay[];
+  /** How many views reached 25/50/75/100% of the article. */
+  scrollDepth: BlogAnalyticsCount[];
+  /** Views grouped by reading time. */
+  timeBuckets: BlogAnalyticsCount[];
+  devices: BlogAnalyticsCount[];
+  sources: BlogAnalyticsCount[];
+  recent: BlogRecentRead[];
 };

@@ -1005,6 +1005,34 @@ export const blogSearchSchema = z.object({
 });
 export type BlogSearch = z.output<typeof blogSearchSchema>;
 
+const readerId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/, 'Invalid id');
+
+/** Reading beacon from the article page. Values are cumulative for the tab session. */
+export const blogReadSchema = z.object({
+  sessionId: readerId,
+  visitorId: readerId,
+  /** Active reading seconds so far; capped at an hour so a forgotten tab can't skew averages. */
+  seconds: z
+    .number()
+    .finite()
+    .min(0)
+    .max(86_400)
+    .transform((v) => Math.min(Math.round(v), 3600)),
+  /** Furthest point of the article reached, 0-100. */
+  scroll: z
+    .number()
+    .finite()
+    .min(0)
+    .max(100)
+    .transform((v) => Math.round(v)),
+  referrer: z.string().max(1000).optional(),
+});
+export type BlogReadInput = z.output<typeof blogReadSchema>;
+
+export const blogAnalyticsQuerySchema = z.object({
+  days: queryNumber(1, 365).transform((v) => v ?? 30),
+});
+
 export const adminBlogQuerySchema = z.object({
   status: queryEnum(BLOG_STATUSES),
   category: queryEnum(BLOG_CATEGORIES),

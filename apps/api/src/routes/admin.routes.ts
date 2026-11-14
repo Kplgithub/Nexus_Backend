@@ -23,6 +23,7 @@ import {
   adminReportQuerySchema,
   reportUpdateSchema,
   adminBlogQuerySchema,
+  blogAnalyticsQuerySchema,
   blogPostCreateSchema,
   blogPostUpdateSchema,
 } from '@nexus/shared';
@@ -44,6 +45,7 @@ import * as adminUsers from '../services/admin-users.service.js';
 import * as projects from '../services/project.service.js';
 import * as reports from '../services/report.service.js';
 import * as blog from '../services/blog.service.js';
+import * as blogAnalytics from '../services/blog-analytics.service.js';
 import { importProperties, importTemplateCsv } from '../services/property-import.service.js';
 
 export const adminRouter: RouterType = Router();
@@ -372,6 +374,16 @@ adminRouter.delete('/faqs/:id', requireRole('editor'), async (req, res) => {
 adminRouter.get('/blog', async (req, res) => {
   const { items, meta } = await blog.listAdmin(parseQuery(adminBlogQuerySchema, req));
   ok(res, items, meta);
+});
+
+adminRouter.get('/blog/analytics', async (req, res) => {
+  const { days } = parseQuery(blogAnalyticsQuerySchema, req);
+  ok(res, await blogAnalytics.overview(days));
+});
+
+adminRouter.get('/blog/:id/analytics', async (req, res) => {
+  const { days } = parseQuery(blogAnalyticsQuerySchema, req);
+  ok(res, await blogAnalytics.postReport(parseId(req), days));
 });
 
 adminRouter.get('/blog/:id', async (req, res) => ok(res, await blog.getAdmin(parseId(req))));

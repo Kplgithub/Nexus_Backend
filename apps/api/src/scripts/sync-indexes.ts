@@ -3,7 +3,7 @@ import { Property } from '../models/property.model.js';
 import * as models from '../models/misc.models.js';
 import { Otp, User } from '../models/user.model.js';
 import { Project } from '../models/project.model.js';
-import { BlogPost } from '../models/blog.model.js';
+import { BlogPost, BlogRead } from '../models/blog.model.js';
 import { runScript } from './run.js';
 
 await runScript('db:indexes', async () => {
@@ -20,6 +20,7 @@ await runScript('db:indexes', async () => {
     models.Report,
     Project,
     BlogPost,
+    BlogRead,
     User,
     Otp,
   ];

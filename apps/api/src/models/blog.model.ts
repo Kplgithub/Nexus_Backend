@@ -45,3 +45,35 @@ blogPostSchema.index({ status: 1, tags: 1, publishedAt: -1 });
 
 export type BlogPostRaw = InferSchemaType<typeof blogPostSchema>;
 export const BlogPost = model('BlogPost', blogPostSchema);
+
+/**
+ * One reading session of one article in one browser tab. The page sends cumulative
+ * numbers, so a session is a single row that only ever grows. No personal data:
+ * the visitor id is a random value kept in the reader's browser.
+ */
+const blogReadSchema = new Schema(
+  {
+    post: { type: Schema.Types.ObjectId, ref: 'BlogPost', required: true },
+    sessionId: { type: String, required: true, maxlength: 64 },
+    visitorId: { type: String, required: true, maxlength: 64 },
+    startedAt: { type: Date, required: true },
+    lastSeenAt: { type: Date, required: true },
+    /** Active reading seconds (tab visible, reader not idle). */
+    seconds: { type: Number, default: 0 },
+    /** Furthest point of the article reached, 0-100. */
+    scroll: { type: Number, default: 0 },
+    device: { type: String, enum: ['mobile', 'tablet', 'desktop'], default: 'desktop' },
+    /** Referrer host, e.g. google.com; '' for direct visits. */
+    source: { type: String, default: '', maxlength: 120 },
+    /** This browser had read an article before this session. */
+    returning: { type: Boolean, default: false },
+  },
+  { versionKey: false },
+);
+blogReadSchema.index({ post: 1, sessionId: 1 }, { unique: true });
+blogReadSchema.index({ post: 1, startedAt: -1 });
+blogReadSchema.index({ startedAt: -1 });
+blogReadSchema.index({ visitorId: 1, startedAt: 1 });
+
+export type BlogReadRaw = InferSchemaType<typeof blogReadSchema>;
+export const BlogRead = model('BlogRead', blogReadSchema);
