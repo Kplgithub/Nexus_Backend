@@ -14,6 +14,7 @@ import { BlogPost, type BlogPostRaw } from '../models/blog.model.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { escapeRegex, paginate } from '../lib/respond.js';
 import { deleteImages } from './upload.service.js';
+import { deleteReadsFor, emptyStats, statsForPosts } from './blog-analytics.service.js';
 
 type Lean = BlogPostRaw & {
   _id: Types.ObjectId;
@@ -157,8 +158,12 @@ export async function listAdmin(q: z.output<typeof adminBlogQuerySchema>) {
       .lean<Lean[]>(),
     BlogPost.countDocuments(filter),
   ]);
+  const stats = await statsForPosts(rows.map((r) => String(r._id)));
   return {
-    items: rows.map((r) => toAdmin({ ...r, content: '' })),
+    items: rows.map((r) => ({
+      ...toAdmin({ ...r, content: '' }),
+      stats: stats.get(String(r._id)) ?? emptyStats(),
+    })),
     meta: paginate(q.page, q.limit, total),
   };
 }
@@ -246,5 +251,6 @@ export async function deletePost(id: string) {
   const doc = await BlogPost.findByIdAndDelete(id).lean<Lean>();
   if (!doc) throw notFound('Article not found');
   if (doc.coverImage?.publicId) await deleteImages([doc.coverImage.publicId]);
+  await deleteReadsFor(id);
   return { title: doc.title };
 }

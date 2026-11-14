@@ -279,6 +279,15 @@ export const openApiDocument = {
         responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } },
       },
     },
+    '/blog/{id}/read': {
+      post: {
+        tags: ['Public'],
+        summary:
+          'Reading beacon: { sessionId, visitorId, seconds, scroll, referrer? } (cumulative per tab session)',
+        parameters: [idParam],
+        responses: { '200': { description: 'OK, { counted }' }, ...errors },
+      },
+    },
     '/faqs': {
       get: {
         tags: ['Public'],
@@ -759,6 +768,22 @@ export const openApiDocument = {
         ...admin,
         summary: 'Create a blog article (editor+)',
         responses: { '201': { description: 'Created' }, ...authErrors, ...errors },
+      },
+    },
+    '/admin/blog/analytics': {
+      get: {
+        ...admin,
+        summary: 'Blog reader analytics: totals, daily trend and posts ranked by views',
+        parameters: [q('days', { type: 'integer' })],
+        responses: { '200': { description: 'OK' }, ...authErrors },
+      },
+    },
+    '/admin/blog/{id}/analytics': {
+      get: {
+        ...admin,
+        summary: 'Reader analytics for one article (time, scroll depth, devices, sources)',
+        parameters: [idParam, q('days', { type: 'integer' })],
+        responses: { '200': { description: 'OK' }, ...authErrors },
       },
     },
     '/admin/blog/{id}': {
