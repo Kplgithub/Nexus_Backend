@@ -78,11 +78,14 @@ publicRouter.post('/properties/:id/view', limiters.view, async (req, res) => {
   ok(res, { counted: true });
 });
 
-publicRouter.get('/home', async (_req, res) => {
+publicRouter.get('/home', async (req, res) => {
+  // Optional ?city=<slug>: the home page shows each visitor their own city.
+  const raw = String(req.query.city ?? '').toLowerCase();
+  const city = raw && SLUG_PATTERN.test(raw) && raw.length <= 60 ? raw : undefined;
   cache(res);
   const [sections, newProjects] = await Promise.all([
-    properties.listHomeSections(),
-    projects.searchProjects({ page: 1, limit: 6 }),
+    properties.listHomeSections(city),
+    projects.searchProjects({ page: 1, limit: 6, ...(city ? { city } : {}) }),
   ]);
   ok(res, { ...sections, projects: newProjects.items });
 });

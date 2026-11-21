@@ -293,6 +293,18 @@ describe('new projects', () => {
       status: 'published',
     });
     expect(await search(`project=${slug}`)).toHaveLength(1);
+
+    // The home page can be limited to one city; an unknown city is simply empty.
+    const homeIn = async (qs: string) => (await request(app).get(`/api/v1/home${qs}`)).body.data;
+    const jaipur = await homeIn('?city=jaipur');
+    expect(jaipur.projects).toHaveLength(1);
+    expect(jaipur.counts.sale + jaipur.counts.rent).toBeGreaterThan(0);
+    const udaipur = await homeIn('?city=udaipur');
+    expect(udaipur.projects).toHaveLength(0);
+    expect(udaipur.counts).toEqual({ sale: 0, rent: 0 });
+    expect([...udaipur.recentSale, ...udaipur.recentRent]).toHaveLength(0);
+    // A bad value is ignored, not an error.
+    expect((await homeIn('?city=%3Cx%3E')).projects).toHaveLength(1);
     const detail = await request(app).get(`/api/v1/properties/${listing.body.data.slug}`);
     expect(detail.body.data.property.project).toMatchObject({ slug, name: 'Aravali Heights' });
 

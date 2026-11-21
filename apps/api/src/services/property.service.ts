@@ -466,25 +466,27 @@ async function findSimilar(p: Lean, limit = 4): Promise<PropertyCard[]> {
   return [...close, ...more].map(toCard);
 }
 
-export async function listHomeSections() {
+/** Home page rails; `citySlug` limits every rail and count to one city. */
+export async function listHomeSections(citySlug?: string) {
+  const base = citySlug ? { ...VISIBLE, citySlug } : VISIBLE;
   const [featured, recentSale, recentRent, counts] = await Promise.all([
-    Property.find({ ...VISIBLE, featured: true })
+    Property.find({ ...base, featured: true })
       .select(CARD_FIELDS)
       .sort({ publishedAt: -1 })
       .limit(6)
       .lean<Lean[]>(),
-    Property.find({ ...VISIBLE, listingType: 'sale' })
+    Property.find({ ...base, listingType: 'sale' })
       .select(CARD_FIELDS)
       .sort({ publishedAt: -1 })
       .limit(6)
       .lean<Lean[]>(),
-    Property.find({ ...VISIBLE, listingType: 'rent' })
+    Property.find({ ...base, listingType: 'rent' })
       .select(CARD_FIELDS)
       .sort({ publishedAt: -1 })
       .limit(6)
       .lean<Lean[]>(),
     Property.aggregate<{ _id: string; n: number }>([
-      { $match: VISIBLE },
+      { $match: base },
       { $group: { _id: '$listingType', n: { $sum: 1 } } },
     ]),
   ]);
