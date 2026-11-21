@@ -27,33 +27,6 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
 
-      # Payment keys live only in GitHub secrets and the server .env, never in the repo.
-      # Skipped when the secrets are not set.
-      - name: Put Razorpay keys in the server .env
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          RZP_ID: ${{ secrets.RAZORPAY_KEY_ID }}
-          RZP_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-        run: |
-          if [ -z "$RZP_ID" ] || [ -z "$RZP_SECRET" ]; then
-            echo 'Razorpay secrets not set, skipping'
-            exit 0
-          fi
-          # The keys go over stdin, so they never appear in a command line.
-          printf 'RAZORPAY_KEY_ID=%s\nRAZORPAY_KEY_SECRET=%s\n' "$RZP_ID" "$RZP_SECRET" |
-            ssh -i ~/.ssh/id_deploy "$USER@$HOST" "
-              set -eu
-              f='$DEPLOY_PATH/apps/api/.env'
-              tmp=\$(mktemp)
-              grep -v -E '^RAZORPAY_KEY_(ID|SECRET)=' \"\$f\" > \"\$tmp\" || true
-              cat >> \"\$tmp\"
-              cat \"\$tmp\" > \"\$f\"
-              rm -f \"\$tmp\"
-              echo 'Razorpay keys updated'
-            "
-
       - name: Deploy to Server via SSH
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
@@ -81,7 +54,7 @@ jobs:
             node --env-file=apps/api/.env apps/api/dist/scripts/apply-seo.js || echo 'seo:apply failed, continuing'
 
             echo 'Restarting nexus-api process...'
-            pm2 restart nexus-api --update-env
+            pm2 restart nexus-api
 
             echo 'Waiting for API health check...'
             for i in \$(seq 1 30); do
