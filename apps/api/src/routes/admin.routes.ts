@@ -46,6 +46,7 @@ import * as projects from '../services/project.service.js';
 import * as reports from '../services/report.service.js';
 import * as blog from '../services/blog.service.js';
 import * as blogAnalytics from '../services/blog-analytics.service.js';
+import { notifyIndexNow } from '../services/indexnow.service.js';
 import { importProperties, importTemplateCsv } from '../services/property-import.service.js';
 
 export const adminRouter: RouterType = Router();
@@ -344,6 +345,15 @@ adminRouter.patch('/locations/:id', requireRole('admin'), async (req, res) => {
   const patch = onlySentKeys(parseBody(cityUpdateSchema, req), req.body);
   const c = await locations.updateCity(id, patch);
   await audit(req.admin, 'update', 'city', id, c.name);
+  if (c.active) {
+    const live = c.localities.filter((l) => l.active);
+    notifyIndexNow(
+      ['buy', 'rent'].flatMap((d) => [
+        `/${d}/${c.slug}`,
+        ...live.map((l) => `/${d}/${c.slug}/${l.slug}`),
+      ]),
+    );
+  }
   ok(res, c);
 });
 
@@ -397,6 +407,7 @@ adminRouter.post('/blog', requireRole('editor'), async (req, res) => {
     post.id,
     post.title,
   );
+  if (post.status === 'published') notifyIndexNow([`/blog/${post.slug}`, '/blog']);
   created(res, post);
 });
 
@@ -412,6 +423,7 @@ adminRouter.patch('/blog/:id', requireRole('editor'), async (req, res) => {
     id,
     post.title,
   );
+  if (post.status === 'published') notifyIndexNow([`/blog/${post.slug}`, '/blog']);
   ok(res, post);
 });
 
