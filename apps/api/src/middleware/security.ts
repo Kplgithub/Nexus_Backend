@@ -40,8 +40,13 @@ const tooMany = (message: string) => (_req: Request, _res: Response, next: NextF
   next(new AppError(429, 'RATE_LIMITED', message));
 };
 
-const make = (windowMs: number, limit: number, message: string) =>
+/** The website's own server-side rendering calls the API directly over loopback (no proxy header). */
+const isInternal = (req: Request) =>
+  !req.get('x-forwarded-for') && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip ?? '');
+
+const make = (windowMs: number, limit: number, message: string, skipInternal = false) =>
   rateLimit({
+    skip: skipInternal ? isInternal : undefined,
     windowMs,
     limit: isTest ? 10_000 : limit,
     standardHeaders: 'draft-8',
@@ -51,7 +56,8 @@ const make = (windowMs: number, limit: number, message: string) =>
   });
 
 export const limiters = {
-  global: make(60_000, 300, 'Too many requests. Please slow down.'),
+  // Page renders by the website server are skipped: they are cached and are not visitor traffic.
+  global: make(60_000, 300, 'Too many requests. Please slow down.', true),
   login: make(15 * 60_000, 10, 'Too many sign-in attempts. Try again in 15 minutes.'),
   publicForm: make(
     60 * 60_000,
