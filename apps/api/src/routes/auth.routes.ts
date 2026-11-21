@@ -3,6 +3,8 @@ import {
   forgotPasswordSchema,
   otpLoginSchema,
   otpRequestSchema,
+  quickStartSchema,
+  quickVerifySchema,
   resetPasswordSchema,
   signupSchema,
   userLoginSchema,
@@ -77,6 +79,26 @@ authRouter.post('/otp/login', limiters.userLogin, async (req, res) => {
   const user = await users.loginWithOtp(phone, code);
   issueUserSession(res, sessionFor(user));
   ok(res, { user: await users.getMe(String(user._id)) });
+});
+
+/** "View number" popup: details → OTP → signed in (new accounts are created here). */
+authRouter.post('/quick/start', limiters.otp, async (req, res) => {
+  const input = parseBody(quickStartSchema, req);
+  if (input.website) throw badRequest('Something went wrong');
+  const sent = await users.quickStart(input, hashIp(req.ip));
+  ok(res, {
+    sent: true,
+    expiresIn: sent.expiresIn,
+    resendIn: sent.resendIn,
+    devCode: sent.devCode,
+  });
+});
+
+authRouter.post('/quick/verify', limiters.userLogin, async (req, res) => {
+  const input = parseBody(quickVerifySchema, req);
+  const { user, created: isNew } = await users.quickVerify(input, hashIp(req.ip));
+  issueUserSession(res, sessionFor(user));
+  ok(res, { user: await users.getMe(String(user._id)), created: isNew });
 });
 
 authRouter.post('/forgot-password', limiters.otp, async (req, res) => {

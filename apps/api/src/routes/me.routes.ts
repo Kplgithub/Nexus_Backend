@@ -15,6 +15,8 @@ import {
   projectUpdateSchema,
   PROJECT_STATUSES,
   paymentVerifySchema,
+  featureAddonSchema,
+  FEATURE_ADDONS,
   type PropertyCard,
 } from '@nexus/shared';
 import * as billing from '../services/billing.service.js';
@@ -259,17 +261,30 @@ meRouter.post('/contact/:id', limiters.userWrite, async (req, res) => {
 /* ---------------- Paid plans ---------------- */
 
 meRouter.get('/plans', async (req, res) => {
-  const [plans, subscription, payments] = await Promise.all([
+  const [plans, subscription, payments, usage] = await Promise.all([
     billing.listPlans(true, req.user!.role),
     billing.activeSubscription(req.user!.id),
     billing.myPayments(req.user!.id),
+    billing.usageFor(req.user!.id, req.user!.role),
   ]);
-  ok(res, { plans, subscription, payments, onlineEnabled: razorpayEnabled });
+  ok(res, {
+    plans,
+    subscription,
+    payments,
+    usage,
+    featureAddons: FEATURE_ADDONS,
+    onlineEnabled: razorpayEnabled,
+  });
 });
 
 meRouter.post('/plans/:id/checkout', limiters.userWrite, async (req, res) =>
   ok(res, await billing.createCheckout(req.user!.id, parseId(req))),
 );
+
+meRouter.post('/properties/:id/feature-checkout', limiters.userWrite, async (req, res) => {
+  const { days } = parseBody(featureAddonSchema, req);
+  ok(res, await billing.createFeatureCheckout(req.user!.id, parseId(req), days));
+});
 
 meRouter.post('/payments/verify', limiters.userWrite, async (req, res) =>
   ok(res, await billing.confirmCheckout(req.user!.id, parseBody(paymentVerifySchema, req))),

@@ -147,7 +147,7 @@ describe('sign-in', () => {
 
 describe('posting and moderation', () => {
   it('drafts, submits, approves and publishes a user listing', async () => {
-    const owner = await signUpUser(app);
+    const owner = await signUpUser(app, 'agent');
     const admin = await signIn(app);
 
     const draft = await owner.post('/api/v1/me/properties', userListing());
@@ -163,7 +163,7 @@ describe('posting and moderation', () => {
 
     const queue = await admin.get('/api/v1/admin/properties?status=pending');
     expect(queue.body.data.map((p: { id: string }) => p.id)).toContain(id);
-    expect(queue.body.data[0].postedBy.role).toBe('individual');
+    expect(queue.body.data[0].postedBy.role).toBe('agent');
 
     const rejected = await admin.post(`/api/v1/admin/properties/${id}/status`, {
       status: 'rejected',
@@ -182,9 +182,10 @@ describe('posting and moderation', () => {
 
     const search = await request(app).get('/api/v1/properties?listingType=sale&city=jaipur');
     expect(search.body.meta.total).toBe(1);
-    expect(search.body.data[0].posterType).toBe('owner');
+    expect(search.body.data[0].posterType).toBe('agent');
     const detail = await request(app).get(`/api/v1/properties/${draft.body.data.slug}`);
-    expect(detail.body.data.property.poster.type).toBe('owner');
+    expect(detail.body.data.property.poster.type).toBe('agent');
+    expect(detail.body.data.property.poster.premium).toBe(false);
     expect(detail.body.data.property.pricePerSqft).toBe(Math.round(5500000 / 1400));
     expect(JSON.stringify(detail.body)).not.toContain(owner.user.phone);
     expect(JSON.stringify(detail.body)).not.toContain(owner.user.email);
@@ -216,20 +217,47 @@ describe('posting and moderation', () => {
     expect((await b.del(`/api/v1/me/properties/${id}`)).status).toBe(404);
   });
 
-  it('enforces the listing limit for individuals', async () => {
+  it('holds an owner’s listing until they take a plan', async () => {
     const owner = await signUpUser(app);
+    const res = await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ status: 'draft', awaitingPlan: true });
+    // Saving edits keeps it waiting; sending it again still waits.
+    const id = res.body.data.id;
+    expect(
+      (await owner.patch(`/api/v1/me/properties/${id}`, { price: 5400000 })).body.data,
+    ).toMatchObject({ status: 'draft', awaitingPlan: true });
+    const again = await owner.post(`/api/v1/me/properties/${id}/status`, { status: 'pending' });
+    expect(again.body.data).toMatchObject({ status: 'draft', awaitingPlan: true });
+    const usage = (await owner.get('/api/v1/me/dashboard')).body.data.usage;
+    expect(usage).toMatchObject({
+      listings: { used: 0, limit: 0 },
+      awaitingPlan: 1,
+      premium: false,
+    });
+  });
+
+  it('gives agents 5 free listings in total; deleting one does not free a slot', async () => {
+    const agent = await signUpUser(app, 'agent');
+    const ids: string[] = [];
     for (let i = 0; i < 5; i++) {
-      expect(
-        (await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }))).status,
-      ).toBe(201);
+      const r = await agent.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+      expect(r.body.data.status).toBe('pending');
+      ids.push(r.body.data.id);
     }
-    const sixth = await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }));
-    expect(sixth.status).toBe(403);
-    expect(sixth.body.error.code).toBe('LISTING_LIMIT');
+    expect((await agent.del(`/api/v1/me/properties/${ids[0]}`)).status).toBe(200);
+    const sixth = await agent.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    expect(sixth.body.data).toMatchObject({ status: 'draft', awaitingPlan: true });
+    const usage = (await agent.get('/api/v1/me/dashboard')).body.data.usage;
+    expect(usage.listings).toEqual({ used: 5, limit: 5 });
+    // A listing that already used a slot can go back for review without a new one.
+    await agent.post(`/api/v1/me/properties/${ids[1]}/status`, { status: 'draft' });
+    const back = await agent.post(`/api/v1/me/properties/${ids[1]}/status`, { status: 'pending' });
+    expect(back.body.data.status).toBe('pending');
   });
 
   it('lets the poster close a live listing', async () => {
-    const owner = await signUpUser(app);
+    const owner = await signUpUser(app, 'agent');
     const admin = await signIn(app);
     const { id } = (await owner.post('/api/v1/me/properties', userListing({ status: 'pending' })))
       .body.data;
@@ -301,6 +329,58 @@ describe('saved, leads and contact', () => {
     // Repeat views don't create duplicate leads.
     await buyer.post(`/api/v1/me/contact/${id}`);
     expect(await Enquiry.countDocuments({ type: 'contact' })).toBe(1);
+  });
+
+  it('signs a visitor up with an OTP from the view-number popup and shows the number', async () => {
+    const { poster, id } = await liveListing();
+    const visitor = request.agent(app);
+    const details = {
+      intent: 'tenant',
+      name: 'Amit Kumar',
+      email: 'amit@example.test',
+      phone: '98290 99887',
+      acceptTerms: true,
+    };
+    const start = await visitor.post('/api/v1/auth/quick/start').send(details);
+    expect(start.status).toBe(200);
+    const bad = await visitor
+      .post('/api/v1/auth/quick/verify')
+      .send({ ...details, code: '000001' });
+    expect(bad.status).toBe(400);
+    const ok = await visitor
+      .post('/api/v1/auth/quick/verify')
+      .send({ ...details, code: start.body.data.devCode });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.created).toBe(true);
+    expect(ok.body.data.user).toMatchObject({ role: 'individual', phoneVerified: true });
+    const u = await User.findOne({ email: 'amit@example.test' }).lean();
+    expect(u!.signupIntent).toBe('tenant');
+
+    const csrf = ([] as string[])
+      .concat(ok.headers['set-cookie'] ?? [])
+      .find((c) => c.startsWith('nexus_ucsrf='))!
+      .split(';')[0]!
+      .split('=')[1]!;
+    const shown = await visitor.post(`/api/v1/me/contact/${id}`).set('X-CSRF-Token', csrf);
+    expect(shown.status).toBe(200);
+    expect(shown.body.data.phone).toBe(poster.user.phone);
+
+    // The same number later signs in instead of creating a second account.
+    const again = request.agent(app);
+    const s2 = await again
+      .post('/api/v1/auth/quick/start')
+      .send({ ...details, intent: 'buyer', email: 'other@example.test' });
+    const v2 = await again
+      .post('/api/v1/auth/quick/verify')
+      .send({ ...details, email: 'other@example.test', code: s2.body.data.devCode });
+    expect(v2.body.data.created).toBe(false);
+    expect(await User.countDocuments({ phone: u!.phone })).toBe(1);
+
+    // A broker becomes an agent; an email already in use is refused.
+    const taken = await request(app)
+      .post('/api/v1/auth/quick/start')
+      .send({ ...details, phone: '98290 55443', intent: 'broker' });
+    expect(taken.status).toBe(409);
   });
 
   it('respects a poster who hides their number', async () => {

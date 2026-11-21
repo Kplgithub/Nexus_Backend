@@ -421,10 +421,20 @@ export const DEFAULT_PLAN = {
   durationDays: 30,
   listingLimit: 25,
   leadLimit: 0,
-  featuredListings: 2,
+  featuredListings: 0,
   featuredDays: 7,
   roles: ['individual', 'agent', 'builder'] as UserRole[],
 } as const;
+
+/** Paid Featured for one live listing, on top of any plan. Rupees, GST included. */
+export const FEATURE_ADDONS = [
+  { days: 7, price: 49, label: '7 days' },
+  { days: 30, price: 99, label: '1 month' },
+] as const;
+export type FeatureAddonDays = (typeof FEATURE_ADDONS)[number]['days'];
+
+export const PAYMENT_KINDS = ['plan', 'featured'] as const;
+export type PaymentKind = (typeof PAYMENT_KINDS)[number];
 
 /** Days before a plan ends when we remind the user to renew. */
 export const PLAN_REMINDER_DAYS = 3;

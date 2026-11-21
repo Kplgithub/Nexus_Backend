@@ -48,6 +48,14 @@ const userSchema = new Schema(
     verificationNote: { type: String, maxlength: 1000, default: null },
     /** End of the user's paid plan (the latest one). Shows the Premium badge until then. */
     premiumUntil: { type: Date, default: null },
+    /** Free listings used, ever. Deleting a listing does not give the slot back. */
+    freePostsUsed: { type: Number, default: 0 },
+    /** What they said they were when they signed up from the "view number" popup. */
+    signupIntent: {
+      type: String,
+      enum: ['tenant', 'buyer', 'broker', 'owner', null],
+      default: null,
+    },
 
     status: { type: String, enum: USER_STATUSES, default: 'active' },
     saved: { type: [Schema.Types.ObjectId], ref: 'Property', default: [] },

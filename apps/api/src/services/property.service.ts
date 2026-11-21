@@ -24,7 +24,7 @@ import {
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
 import { Property, type PropertyAttrs } from '../models/property.model.js';
-import { activeSubscription, listingLimitFor } from './billing.service.js';
+import { claimListingSlot, listingLimitFor } from './billing.service.js';
 import { businessAlert } from './notification.service.js';
 import { Project } from '../models/project.model.js';
 import { Enquiry, SlugRedirect } from '../models/misc.models.js';
@@ -298,7 +298,9 @@ async function postersById(ids: (Types.ObjectId | null | undefined)[]) {
   const unique = [...new Set(ids.filter(Boolean).map(String))];
   if (!unique.length) return new Map<string, PosterUser>();
   const users = await User.find({ _id: { $in: unique } })
-    .select('name role companyName verified premiumUntil showPhone email phone createdAt profileSlug')
+    .select(
+      'name role companyName verified premiumUntil showPhone email phone createdAt profileSlug',
+    )
     .lean<PosterUser[]>();
   return new Map(users.map((u) => [String(u._id), u]));
 }
@@ -826,50 +828,32 @@ export async function deleteProperty(id: string) {
 /* Listings owned by website users                                     */
 /* ------------------------------------------------------------------ */
 
-const ACTIVE_FOR_LIMIT: PropertyStatus[] = ['pending', 'published'];
-
 async function ownedDoc(userId: string, id: string) {
   const doc = await Property.findOne({ _id: id, postedBy: userId });
   if (!doc) throw notFound('Listing not found');
   return doc;
 }
 
-async function assertUnderLimit(userId: string, role: UserRole, excludeId?: Types.ObjectId) {
-  const [active, limit] = await Promise.all([
-    Property.countDocuments({
-      postedBy: userId,
-      status: { $in: ACTIVE_FOR_LIMIT },
-      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
-    }),
-    listingLimitFor(userId, role),
-  ]);
-  if (active >= limit) {
-    throw new AppError(
-      403,
-      'LISTING_LIMIT',
-      `You can have up to ${limit} live or in-review listings. Mark some as rented, sold or inactive first, or take a paid plan for more.`,
-    );
-  }
-}
-
 /**
- * Where a listing the user sends for review goes: straight to review when they have room,
- * or saved as a draft that waits for a plan when they are on the free allowance. With a
- * plan already on and no room left, it is an error.
+ * What happens when the user sends a listing for review. A listing that already used a
+ * slot goes straight to review. Otherwise it takes one slot from the plan or the free
+ * allowance; with none left and no plan it is saved and waits for a plan ("hold").
  */
-async function reviewOrHold(userId: string, role: UserRole, excludeId?: Types.ObjectId) {
-  const [active, limit] = await Promise.all([
-    Property.countDocuments({
-      postedBy: userId,
-      status: { $in: ACTIVE_FOR_LIMIT },
-      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
-    }),
-    listingLimitFor(userId, role),
-  ]);
-  if (active < limit) return 'review' as const;
-  if (!(await activeSubscription(userId))) return 'hold' as const;
-  await assertUnderLimit(userId, role, excludeId);
-  return 'review' as const;
+async function reviewOrHold(
+  userId: string,
+  role: UserRole,
+  doc?: { slotUsed?: boolean | null; submittedAt?: Date | null },
+) {
+  if (doc?.slotUsed || doc?.submittedAt) return 'review' as const;
+  const r = await claimListingSlot(userId, role);
+  if (r === 'claimed') return 'claimed' as const;
+  if (r === 'hold') return 'hold' as const;
+  const limit = await listingLimitFor(userId, role);
+  throw new AppError(
+    403,
+    'LISTING_LIMIT',
+    `You have posted all ${limit} listings in your plan. Your next plan adds more.`,
+  );
 }
 
 /** Tells the team a listing is waiting in the review queue. */
@@ -900,11 +884,11 @@ export async function createMine(
   user: { id: string; role: UserRole },
   input: UserPropertyCreate,
 ): Promise<OwnListing> {
-  const hold =
-    input.status === 'pending' && (await reviewOrHold(user.id, user.role)) === 'hold';
-  if (hold) input = { ...input, status: 'draft' };
   const loc = await resolveLocation(input.citySlug, input.localitySlug, { activeOnly: true });
   await checkProject(input.projectId, input.citySlug);
+  const outcome = input.status === 'pending' ? await reviewOrHold(user.id, user.role) : null;
+  const hold = outcome === 'hold';
+  if (hold) input = { ...input, status: 'draft' };
   const doc = await Property.create({
     ...normaliseExtras(normaliseForType(input, input.listingType), input.propertyType),
     slug: await uniqueSlug(`${input.title} ${loc.localityName}`),
@@ -916,6 +900,7 @@ export async function createMine(
     posterType: posterTypeFor(user.role),
     ...statusSideEffects({}, input.status),
     awaitingPlan: hold,
+    slotUsed: outcome === 'claimed',
     createdBy: user.id,
     updatedBy: user.id,
   });
@@ -945,14 +930,15 @@ export async function updateMine(
   const wasLive = doc.status === 'published';
   let hold = false;
   if (wasLive) {
-    await assertUnderLimit(user.id, user.role, doc._id);
     next.status = 'pending';
   } else if (patch.status === 'pending') {
-    hold = (await reviewOrHold(user.id, user.role, doc._id)) === 'hold';
+    const outcome = await reviewOrHold(user.id, user.role, doc);
+    hold = outcome === 'hold';
     if (hold) next.status = 'draft';
+    if (outcome === 'claimed') doc.slotUsed = true;
   }
   await applyUpdate(doc, next, user.id);
-  if (hold || doc.awaitingPlan) {
+  if ((patch.status || wasLive) && hold !== Boolean(doc.awaitingPlan)) {
     doc.awaitingPlan = hold;
     await doc.save();
   }
@@ -984,10 +970,14 @@ export async function setMyStatus(
   if (!allowed.includes(status)) {
     throw badRequest(`A listing that is ${doc.status} cannot be changed to ${status}`);
   }
-  if (status === 'pending' && (await reviewOrHold(user.id, user.role, doc._id)) === 'hold') {
-    doc.awaitingPlan = true;
-    await doc.save();
-    return getMine(user.id, id);
+  if (status === 'pending') {
+    const outcome = await reviewOrHold(user.id, user.role, doc);
+    if (outcome === 'hold') {
+      doc.awaitingPlan = true;
+      await doc.save();
+      return getMine(user.id, id);
+    }
+    if (outcome === 'claimed') doc.slotUsed = true;
   }
   await applyUpdate(doc, { status } as PropertyUpdate, user.id);
   if (doc.awaitingPlan) {

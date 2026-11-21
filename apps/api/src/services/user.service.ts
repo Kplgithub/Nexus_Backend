@@ -5,6 +5,8 @@ import {
   type SessionUser,
   type UserRole,
   type profileUpdateSchema,
+  type quickStartSchema,
+  type quickVerifySchema,
   type signupSchema,
 } from '@nexus/shared';
 import { businessAlert } from './notification.service.js';
@@ -356,4 +358,67 @@ export async function changeUserPassword(userId: string, current: string, next: 
 
 export async function signOutUserEverywhere(userId: string) {
   await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
+}
+
+/* ---------------- Quick sign-up from the "view number" popup ---------------- */
+
+const intentRole = (intent: string): UserRole => (intent === 'broker' ? 'agent' : 'individual');
+
+/**
+ * Step 1: sends an OTP to the visitor's mobile. A known number signs in with it; a new
+ * number gets an account once the code is checked. The email must not belong to someone else.
+ */
+export async function quickStart(input: z.output<typeof quickStartSchema>, ipHash?: string) {
+  const phone = requireMobile(input.phone);
+  const existing = await User.findOne({ phone }).select('status email').lean();
+  if (existing && existing.status !== 'active')
+    throw new AppError(403, 'BLOCKED', 'This account has been suspended. Contact NEXUS Estate.');
+  if (!existing && (await User.exists({ email: input.email })))
+    throw new AppError(409, 'ACCOUNT_EXISTS', 'This email is already used by another account.', {
+      email: ['This email is already used by another account. Log in instead.'],
+    });
+  return sendOtp(phone, existing ? 'login' : 'verify', ipHash);
+}
+
+/** Step 2: checks the code, signs the visitor in, and creates the account if it is new. */
+export async function quickVerify(input: z.output<typeof quickVerifySchema>, ipHash?: string) {
+  const phone = requireMobile(input.phone);
+  const existing = await User.findOne({ phone });
+  if (existing) {
+    await verifyOtp(phone, 'login', input.code);
+    if (existing.status !== 'active')
+      throw new AppError(403, 'BLOCKED', 'This account has been suspended. Contact NEXUS Estate.');
+    existing.phoneVerified = true;
+    existing.lastLoginAt = new Date();
+    await existing.save();
+    return { user: existing, created: false };
+  }
+  await verifyOtp(phone, 'verify', input.code);
+  if (await User.exists({ email: input.email }))
+    throw new AppError(409, 'ACCOUNT_EXISTS', 'This email is already used by another account.', {
+      email: ['This email is already used by another account. Log in instead.'],
+    });
+  const role = intentRole(input.intent);
+  const user = await User.create({
+    role,
+    name: input.name,
+    email: input.email,
+    phone,
+    phoneVerified: true,
+    // No password yet: they sign in with an OTP, or set one with "Forgot password".
+    passwordHash: await hashPassword(randomToken()),
+    profileSlug: role === 'agent' ? await uniqueProfileSlug(input.name) : undefined,
+    signupIntent: input.intent,
+    termsAcceptedAt: new Date(),
+    signupIpHash: ipHash,
+    verificationStatus: role === 'agent' ? 'pending' : 'unverified',
+    lastLoginAt: new Date(),
+  });
+  if (role === 'agent')
+    void businessAlert('signup', {
+      title: `New agent signed up: ${input.name}`,
+      body: 'Signed up while viewing a number. Check their details and verify the profile.',
+      link: '/admin/verification',
+    });
+  return { user, created: true };
 }

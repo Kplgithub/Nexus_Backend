@@ -95,6 +95,31 @@ export async function sendWhatsApp(to: string, text: string): Promise<boolean> {
   }
 }
 
+/** Sends a DLT-approved MSG91 Flow SMS. Returns false when not set up or failed. */
+export async function sendFlowSms(to: string, vars: Record<string, string>): Promise<boolean> {
+  if (env.SMS_DRIVER !== 'msg91' || !env.MSG91_CONTACT_FLOW_ID || !env.MSG91_AUTH_KEY) return false;
+  try {
+    const res = await fetch('https://control.msg91.com/api/v5/flow', {
+      method: 'POST',
+      headers: { authkey: env.MSG91_AUTH_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        template_id: env.MSG91_CONTACT_FLOW_ID,
+        short_url: '0',
+        recipients: [{ mobiles: to.replace(/^\+/, ''), ...vars }],
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      logger.warn({ status: res.status, body: await res.text() }, 'Flow SMS failed');
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.warn({ err }, 'Flow SMS failed');
+    return false;
+  }
+}
+
 /* ---------------- In-app bell + outside alerts ---------------- */
 
 type Audience = 'all' | 'super' | Array<string | Types.ObjectId>;

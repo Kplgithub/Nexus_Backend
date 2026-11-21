@@ -1,6 +1,7 @@
 import type {
   AdminRole,
   AlertEvent,
+  PaymentKind,
   PaymentMethod,
   PaymentStatus,
   SiteVisitStatus,
@@ -442,7 +443,6 @@ export type PlanUsage = {
   listings: { used: number; limit: number };
   /** Leads with contact details this period. limit null means no limit. */
   leads: { used: number; limit: number | null; locked: number; periodStart: string };
-  featured: { used: number; limit: number; days: number };
   awaitingPlan: number;
   premium: boolean;
 };
@@ -793,6 +793,9 @@ export type Plan = {
 
 export type Payment = {
   id: string;
+  kind: PaymentKind;
+  /** For a Featured payment: the listing it featured. */
+  property: { id: string; title: string; slug: string } | null;
   user: { id: string; name: string; role: UserRole; phone: string } | null;
   plan: {
     id: string;

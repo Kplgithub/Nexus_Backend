@@ -1,5 +1,11 @@
 import { Schema, model } from 'mongoose';
-import { PAYMENT_METHODS, PAYMENT_STATUSES, SITE_VISIT_STATUSES, USER_ROLES } from '@nexus/shared';
+import {
+  PAYMENT_KINDS,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  SITE_VISIT_STATUSES,
+  USER_ROLES,
+} from '@nexus/shared';
 
 const noteSchema = new Schema(
   {
@@ -58,7 +64,13 @@ export const Plan = model('Plan', planSchema);
 const paymentSchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    plan: { type: Schema.Types.ObjectId, ref: 'Plan', required: true },
+    /** "plan" buys a subscription; "featured" features one listing for featureDays. */
+    kind: { type: String, enum: PAYMENT_KINDS, default: 'plan' },
+    plan: { type: Schema.Types.ObjectId, ref: 'Plan', default: null },
+    property: { type: Schema.Types.ObjectId, ref: 'Property', default: null },
+    featureDays: { type: Number, default: null },
+    /** Listings posted in this plan period (deleting one does not give the slot back). */
+    postsUsed: { type: Number, default: 0 },
     planSnapshot: {
       name: String,
       durationDays: Number,
@@ -86,7 +98,11 @@ const paymentSchema = new Schema(
 );
 paymentSchema.index({ user: 1, status: 1, endsAt: -1 });
 paymentSchema.index({ status: 1, createdAt: -1 });
-paymentSchema.index({ orderId: 1 }, { unique: true, sparse: true });
+// Manual payments have no order id (null), so only real ids must be unique.
+paymentSchema.index(
+  { orderId: 1 },
+  { unique: true, partialFilterExpression: { orderId: { $type: 'string' } } },
+);
 export const Payment = model('Payment', paymentSchema);
 
 /* ---------------- Admin notifications (the bell) ---------------- */
