@@ -16,6 +16,7 @@ import {
   type PublicProject,
   type adminProjectQuerySchema,
   type adminProjectUpdateSchema,
+  coverFirst,
 } from '@nexus/shared';
 import { Project, type ProjectAttrs } from '../models/project.model.js';
 import { Enquiry } from '../models/misc.models.js';
@@ -66,8 +67,9 @@ function unitSummary(configs: Lean['configurations']) {
     .join(' · ');
 }
 
+/** Public gallery, cover photo first. */
 function images(p: Lean) {
-  return (p.images ?? []).map((i) => ({
+  return coverFirst(p.images ?? [], p.coverImageIndex).map((i) => ({
     url: i.url,
     alt: i.alt || p.name,
     width: i.width ?? undefined,
@@ -110,7 +112,7 @@ function core(p: Lean): Core {
     priceRange: { min: p.minPrice ?? 0, max: p.maxPrice ?? 0 },
     amenities: (p.amenities ?? []) as PublicProject['amenities'],
     images: imgs,
-    coverImage: imgs[p.coverImageIndex ?? 0] ?? imgs[0] ?? null,
+    coverImage: imgs[0] ?? null,
     brochureUrl: p.brochureUrl ?? null,
     videoUrl: p.videoUrl ?? null,
     featured: p.featured ?? false,

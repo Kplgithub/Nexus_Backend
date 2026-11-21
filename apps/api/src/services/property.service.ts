@@ -21,6 +21,7 @@ import {
   type UserPropertyCreate,
   type UserPropertyUpdate,
   type UserRole,
+  coverFirst,
 } from '@nexus/shared';
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
@@ -170,7 +171,9 @@ function core(p: Lean): ListingCore {
     parking: (p.parking ?? 'none') as PublicProperty['parking'],
     preferredTenants: (p.preferredTenants ?? []) as PublicProperty['preferredTenants'],
     suitableFor: p.suitableFor ?? [],
-    images: (p.images ?? []).map((i) => ({
+    // The cover photo always leads the gallery, so the property page and the
+    // cards show the same first photo.
+    images: coverFirst(p.images ?? [], p.coverImageIndex).map((i) => ({
       url: i.url,
       alt: i.alt || p.title,
       width: i.width ?? undefined,
