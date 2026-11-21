@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  coverFirst,
   enquiryCreateSchema,
   formatPrice,
   formatRent,
@@ -219,5 +220,17 @@ describe('signupSchema', () => {
     expect(signupSchema.safeParse({ ...base, password: 'short' }).success).toBe(false);
     expect(signupSchema.safeParse({ ...base, password: 'lettersonly' }).success).toBe(false);
     expect(signupSchema.safeParse({ ...base, acceptTerms: false }).success).toBe(false);
+  });
+});
+
+describe('coverFirst', () => {
+  it('moves the cover photo to the front and keeps the rest in order', () => {
+    expect(coverFirst(['a', 'b', 'c', 'd'], 2)).toEqual(['c', 'a', 'b', 'd']);
+  });
+  it('leaves the list alone for index 0, missing or out of range', () => {
+    expect(coverFirst(['a', 'b'], 0)).toEqual(['a', 'b']);
+    expect(coverFirst(['a', 'b'], undefined)).toEqual(['a', 'b']);
+    expect(coverFirst(['a', 'b'], 5)).toEqual(['a', 'b']);
+    expect(coverFirst([], 3)).toEqual([]);
   });
 });
