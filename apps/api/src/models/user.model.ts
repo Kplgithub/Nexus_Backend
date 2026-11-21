@@ -1,5 +1,6 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 import { OTP_PURPOSES, USER_ROLES, USER_STATUSES, VERIFICATION_STATUSES } from '@nexus/shared';
+import { refreshWebsiteOnWrite } from '../lib/web-revalidate.js';
 
 /**
  * Website users: buyers/owners/tenants ("individual"), agents and builders.
@@ -81,6 +82,9 @@ userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1, status: 1, createdAt: -1 });
 userSchema.index({ role: 1, verificationStatus: 1, createdAt: -1 });
 userSchema.index({ profileSlug: 1 }, { unique: true, sparse: true });
+
+// Removing a poster (e.g. demo agents) must drop their public profile right away.
+refreshWebsiteOnWrite(userSchema, ['profiles', 'properties'], { deletesOnly: true });
 
 export type UserAttrs = InferSchemaType<typeof userSchema>;
 export type UserDoc = HydratedDocument<UserAttrs>;

@@ -20,6 +20,7 @@ import {
   PROPERTY_STATUSES,
   TRANSACTION_TYPES,
 } from '@nexus/shared';
+import { refreshWebsiteOnWrite } from '../lib/web-revalidate.js';
 
 const moneyField = {
   type: Number,
@@ -198,6 +199,8 @@ propertySchema.index(
     name: 'property_text',
   },
 );
+
+refreshWebsiteOnWrite(propertySchema, ['properties', 'locations']);
 
 export type PropertyAttrs = InferSchemaType<typeof propertySchema>;
 export type PropertyDoc = HydratedDocument<PropertyAttrs>;

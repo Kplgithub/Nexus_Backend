@@ -6,6 +6,7 @@ import {
   PROJECT_STATUSES,
   PROJECT_UNIT_TYPES,
 } from '@nexus/shared';
+import { refreshWebsiteOnWrite } from '../lib/web-revalidate.js';
 
 /**
  * A builder's new project (MagicBricks-style "New Projects"). Projects go through the
@@ -96,6 +97,8 @@ projectSchema.index({ status: 1, featured: -1, publishedAt: -1 });
 projectSchema.index({ builder: 1, status: 1, updatedAt: -1 });
 projectSchema.index({ status: 1, submittedAt: 1 });
 projectSchema.index({ geo: '2dsphere' }, { sparse: true });
+
+refreshWebsiteOnWrite(projectSchema, ['projects', 'properties']);
 
 export type ProjectAttrs = InferSchemaType<typeof projectSchema>;
 export type ProjectDoc = HydratedDocument<ProjectAttrs>;
