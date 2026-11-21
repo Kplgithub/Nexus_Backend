@@ -45,7 +45,9 @@ jobs:
             pnpm install
 
             echo 'Building backend...'
-            pnpm build
+            # The type-checker needs more memory than Node's default limit on this server.
+            free -m || true
+            NODE_OPTIONS=--max-old-space-size=1536 pnpm build
 
             echo 'Syncing database indexes...'
             node --env-file=apps/api/.env apps/api/dist/scripts/sync-indexes.js
