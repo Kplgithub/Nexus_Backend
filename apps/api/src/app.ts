@@ -21,7 +21,10 @@ export function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.set('trust proxy', env.TRUST_PROXY);
+  // Behind the host's Nginx on the same machine. With TRUST_PROXY unset, still trust
+  // X-Forwarded-For from loopback only, so rate limits see each visitor's real IP
+  // instead of putting every visitor in one shared 127.0.0.1 bucket.
+  app.set('trust proxy', env.TRUST_PROXY || 'loopback');
   // Sorted, case-sensitive query parsing; arrays limited by the "simple" parser.
   app.set('query parser', 'simple');
 
