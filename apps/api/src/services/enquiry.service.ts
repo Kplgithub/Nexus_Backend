@@ -15,7 +15,7 @@ import { Admin, Enquiry } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
 import { Project } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
-import { otpEnabled, env } from '../config/env.js';
+import { otpEnabled, env, mailEnabled, whatsappEnabled } from '../config/env.js';
 import { AppError, badRequest, forbidden, notFound } from '../lib/errors.js';
 import type { AuthedUser } from '../middleware/user-auth.js';
 import { escapeRegex, paginate } from '../lib/respond.js';
@@ -644,7 +644,16 @@ export async function revealContact(propertyId: string, viewer: AuthedUser, meta
     );
     void sendContactToViewer(viewer, property, contact);
   }
-  return contact;
+  return {
+    ...contact,
+    // Where a copy of the number went (only on the first view).
+    sent: {
+      email: !already && mailEnabled,
+      mobile:
+        !already &&
+        ((env.SMS_DRIVER === 'msg91' && Boolean(env.MSG91_CONTACT_FLOW_ID)) || whatsappEnabled),
+    },
+  };
 }
 
 /** Sends the poster's number to the visitor by email and SMS (and WhatsApp when set up). */
