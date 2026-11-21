@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Router, type Router as RouterType } from 'express';
 import multer from 'multer';
 import {
@@ -75,6 +76,7 @@ import * as blog from '../services/blog.service.js';
 import * as blogAnalytics from '../services/blog-analytics.service.js';
 import { notifyIndexNow } from '../services/indexnow.service.js';
 import { importProperties, importTemplateCsv } from '../services/property-import.service.js';
+import { searchInsights } from '../services/smart-search/smart-search.service.js';
 
 export const adminRouter: RouterType = Router();
 
@@ -190,6 +192,16 @@ adminRouter.post('/team/:id/password', requireRole('admin'), async (req, res) =>
 adminRouter.get('/activity', requireRole('admin'), async (req, res) => {
   const { items, meta } = await team.listActivity(parseQuery(activityQuerySchema, req));
   ok(res, items, meta);
+});
+
+/* ---------------- What visitors search for ---------------- */
+
+adminRouter.get('/search-insights', async (req, res) => {
+  const { days } = parseQuery(
+    z.object({ days: z.coerce.number().int().min(1).max(180).default(30) }),
+    req,
+  );
+  ok(res, await searchInsights(days));
 });
 
 /* ---------------- Alert settings (Super Admin) ---------------- */

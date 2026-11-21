@@ -33,6 +33,10 @@ import * as leads from '../services/enquiry.service.js';
 import * as blog from '../services/blog.service.js';
 import * as blogAnalytics from '../services/blog-analytics.service.js';
 import { getPublicSettings } from '../services/settings.service.js';
+import {
+  smartSearch,
+  smartSearchQuerySchema,
+} from '../services/smart-search/smart-search.service.js';
 
 export const publicRouter: RouterType = Router();
 
@@ -47,6 +51,13 @@ publicRouter.get('/properties', async (req, res) => {
   const { items, meta } = await properties.searchPublic(q);
   cache(res);
   ok(res, items, meta);
+});
+
+/** Plain-language search: "2bhk furnished vaishali nagar 15k tak". */
+publicRouter.get('/smart-search', limiters.smartSearch, async (req, res) => {
+  const q = parseQuery(smartSearchQuerySchema, req);
+  res.set('Cache-Control', 'no-store');
+  ok(res, await smartSearch(q));
 });
 
 publicRouter.get('/properties/:slug', async (req, res) => {

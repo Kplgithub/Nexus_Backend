@@ -175,6 +175,22 @@ export const openApiDocument = {
         },
       },
     },
+    '/smart-search': {
+      get: {
+        tags: ['Public'],
+        summary: 'Plain-language search ("2bhk furnished vaishali nagar 15k tak")',
+        description:
+          'Understands English, Hinglish and Hindi, then ranks listings by how well they match (exact first, then the closest).',
+        parameters: [
+          q('q', { type: 'string' }, 'What the visitor typed (1–200 characters)'),
+          q('deal', { type: 'string', enum: ['rent', 'sale'] }, 'The page the box sits on'),
+          q('drop', { type: 'string' }, 'Comma separated chip keys the visitor removed'),
+          q('maxPrice', { type: 'integer' }, 'Overrides the budget ("raise budget")'),
+          q('page', { type: 'integer' }),
+        ],
+        responses: { '200': { description: 'Ranked results with what was understood' } },
+      },
+    },
     '/properties': {
       get: {
         tags: ['Public'],
