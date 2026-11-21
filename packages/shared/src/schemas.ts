@@ -773,6 +773,29 @@ const optionalUrl = z
   .optional()
   .transform((v) => v || undefined);
 
+export const HOME_BANNER_PLACEMENTS = ['top', 'middle', 'lower'] as const;
+
+/** A promotional banner an admin places on the home page (offers, partners, campaigns). */
+export const homeBannerSchema = z.object({
+  id: z.string().trim().min(1).max(40),
+  placement: z.enum(HOME_BANNER_PLACEMENTS).default('middle'),
+  imageUrl: imageUrl,
+  title: plainText(0, 80).default(''),
+  text: plainText(0, 200).default(''),
+  buttonLabel: plainText(0, 30).default(''),
+  /** Site path like /buy or a full https link. */
+  link: z
+    .string()
+    .trim()
+    .max(300)
+    .refine((v) => v === '' || /^\/[^\s]*$/.test(v) || /^https:\/\/[^\s]+$/.test(v), {
+      message: 'Link must start with / or https://',
+    })
+    .default(''),
+  active: z.boolean().default(true),
+});
+export type HomeBannerInput = z.input<typeof homeBannerSchema>;
+
 export const siteSettingsSchema = z.object({
   businessName: plainText(2, 80),
   tagline: plainText(0, 80),
@@ -824,6 +847,7 @@ export const siteSettingsSchema = z.object({
     heroImageUrl: optionalUrl,
     showRecent: z.boolean().default(true),
     showFeatured: z.boolean().default(true),
+    banners: z.array(homeBannerSchema).max(12).default([]),
   }),
   allowInternationalEnquiries: z.boolean().default(false),
   enquiryNotificationEmail: z

@@ -282,6 +282,18 @@ export type Faq = {
   showOnHome: boolean;
 };
 
+export type HomeBanner = {
+  id: string;
+  /** top: beside the photo tiles; middle: wide banner after agents; lower: two-up after tools. */
+  placement: 'top' | 'middle' | 'lower';
+  imageUrl: string;
+  title: string;
+  text: string;
+  buttonLabel: string;
+  link: string;
+  active: boolean;
+};
+
 export type SiteSettings = {
   businessName: string;
   tagline: string;
@@ -304,6 +316,8 @@ export type SiteSettings = {
     heroImageUrl?: string;
     showRecent: boolean;
     showFeatured: boolean;
+    /** Home page promo banners, managed in admin Settings. */
+    banners: HomeBanner[];
   };
   allowInternationalEnquiries: boolean;
   /** Admin only. */

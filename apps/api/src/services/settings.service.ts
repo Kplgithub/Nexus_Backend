@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     heroImageUrl: undefined,
     showRecent: true,
     showFeatured: true,
+    banners: [],
   },
   allowInternationalEnquiries: false,
   enquiryNotificationEmail: undefined,
@@ -32,6 +33,7 @@ export async function getSettings(): Promise<SiteSettings> {
   const doc = await SiteSettingsModel.findOne({ key: 'site' }).lean();
   const merged = { ...DEFAULT_SETTINGS, ...((doc?.data as Partial<SiteSettings>) ?? {}) };
   merged.home = { ...DEFAULT_SETTINGS.home, ...(merged.home ?? {}) };
+  merged.home.banners ??= [];
   cache = { value: merged, at: Date.now() };
   return merged;
 }
