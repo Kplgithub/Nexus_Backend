@@ -374,6 +374,88 @@ describe('plans and payments', () => {
     expect((await owner.get('/api/v1/me/dashboard')).body.data.subscription).toBeNull();
   });
 
+  it('counts plan listings live at one time: unlisting one frees a place', async () => {
+    const plan = (
+      await boss.post('/api/v1/admin/plans', {
+        name: 'Agent Two',
+        price: 599,
+        durationDays: 30,
+        listingLimit: 2,
+        roles: ['agent'],
+      })
+    ).body.data;
+    const agent = await signUpUser(app, 'agent');
+    await boss.post('/api/v1/admin/payments/manual', {
+      userId: agent.user.id,
+      planId: plan.id,
+      amount: 599,
+    });
+    const post = (n: string) =>
+      agent.post(
+        '/api/v1/me/properties',
+        userListing({ status: 'pending', title: `2 BHK flat number ${n} near Gandhi Path` }),
+      );
+    const one = (await post('one')).body.data;
+    const two = (await post('two')).body.data;
+    await boss.post(`/api/v1/admin/properties/${one.id}/status`, { status: 'published' });
+
+    // Both places are taken (one live, one in review).
+    const full = await post('three');
+    expect(full.status).toBe(403);
+    expect(full.body.error).toMatchObject({ code: 'LISTING_LIMIT' });
+    expect(full.body.error.message).toContain('Unlist');
+    // A draft does not need a place.
+    const draft = await agent.post(
+      '/api/v1/me/properties',
+      userListing({ status: 'draft', title: '2 BHK flat number four near Gandhi Path' }),
+    );
+    expect(draft.status).toBe(201);
+    expect((await agent.get('/api/v1/me/dashboard')).body.data.usage.listings).toEqual({
+      used: 2,
+      limit: 2,
+    });
+
+    // Unlisting the live one frees a place, so the draft can go for review.
+    await agent.post(`/api/v1/me/properties/${one.id}/status`, { status: 'inactive' });
+    const sent = await agent.patch(`/api/v1/me/properties/${draft.body.data.id}`, {
+      status: 'pending',
+    });
+    expect(sent.body.data.status).toBe('pending');
+
+    // Reactivating the old one now needs a place again.
+    const back = await agent.post(`/api/v1/me/properties/${one.id}/status`, { status: 'pending' });
+    expect(back.status).toBe(403);
+    expect(back.body.error.code).toBe('LISTING_LIMIT');
+
+    // Deleting one in review frees a place too.
+    await agent.post(`/api/v1/me/properties/${two.id}/status`, { status: 'draft' });
+    expect((await agent.del(`/api/v1/me/properties/${two.id}`)).status).toBeLessThan(300);
+    const again = await agent.post(`/api/v1/me/properties/${one.id}/status`, {
+      status: 'pending',
+    });
+    expect(again.body.data.status).toBe('pending');
+  });
+
+  it('keeps the free listings a lifetime total: deleting does not give one back', async () => {
+    const agent = await signUpUser(app, 'agent');
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await agent.post(
+        '/api/v1/me/properties',
+        userListing({ status: 'pending', title: `2 BHK flat free number ${i} near Gandhi Path` }),
+      );
+      expect(r.body.data.status).toBe('pending');
+      ids.push(r.body.data.id);
+    }
+    await agent.post(`/api/v1/me/properties/${ids[0]}/status`, { status: 'draft' });
+    await agent.del(`/api/v1/me/properties/${ids[0]}`);
+    const sixth = await agent.post(
+      '/api/v1/me/properties',
+      userListing({ status: 'pending', title: '2 BHK flat free number six near Gandhi Path' }),
+    );
+    expect(sixth.body.data).toMatchObject({ status: 'draft', awaitingPlan: true });
+  });
+
   it('creates the ₹599 Premium plan once on first start', async () => {
     expect(await ensureDefaultPlan()).toBe(true);
     expect(await ensureDefaultPlan()).toBe(false);

@@ -366,23 +366,39 @@ export async function activeSubscription(userId: string): Promise<MySubscription
   return { plan: planRef(p), startsAt: p.startsAt!.toISOString(), endsAt: p.endsAt!.toISOString() };
 }
 
+/** Statuses that hold a plan slot: listings that are live or waiting for review. */
+export const ACTIVE_LISTING_STATUSES = ['published', 'pending'] as const;
+
+/** How many of the user's listings are live or in review right now (optionally leaving one out). */
+export async function activeListingCount(userId: string, exceptId?: string) {
+  return Property.countDocuments({
+    postedBy: userId,
+    status: { $in: [...ACTIVE_LISTING_STATUSES] },
+    ...(exceptId ? { _id: { $ne: exceptId } } : {}),
+  });
+}
+
+/** The listing limit of the plan covering right now, or null with no plan on. */
+export async function currentPlanListingLimit(userId: string) {
+  const pay = await currentPlanPayment(userId);
+  return pay ? pay.planSnapshot.listingLimit : null;
+}
+
 /**
- * Takes one listing slot for a listing being sent for review: from the current plan if
- * it has room, else from the free allowance. Slots are never given back, so deleting a
- * listing does not free one. "hold": no plan and no free slot, so the listing waits for
- * a plan. "full": the plan's slots are used up.
+ * Takes one listing slot for a listing being sent for review.
+ * With a plan on, the plan limit is how many listings may be live or in review at one
+ * time: unlisting, selling, renting or deleting one frees a place. "full": that many are
+ * already running. Without a plan, it uses the free allowance, which is a lifetime total
+ * that deleting does not give back. "hold": no plan and no free slot, so the listing
+ * waits for a plan.
  */
-export async function claimListingSlot(userId: string, role: UserRole) {
+export async function claimListingSlot(userId: string, role: UserRole, exceptId?: string) {
   const pay = await currentPlanPayment(userId);
   if (pay) {
-    const r = await Payment.updateOne(
-      {
-        _id: pay._id,
-        $expr: { $lt: [{ $ifNull: ['$postsUsed', 0] }, '$planSnapshot.listingLimit'] },
-      },
-      { $inc: { postsUsed: 1 } },
-    );
-    if (r.modifiedCount) return 'claimed' as const;
+    const active = await activeListingCount(userId, exceptId);
+    if (active >= pay.planSnapshot.listingLimit) return 'full' as const;
+    await Payment.updateOne({ _id: pay._id }, { $inc: { postsUsed: 1 } });
+    return 'claimed' as const;
   }
   const free = LISTING_LIMITS[role];
   if (free > 0) {
@@ -392,13 +408,18 @@ export async function claimListingSlot(userId: string, role: UserRole) {
     );
     if (r.modifiedCount) return 'claimed' as const;
   }
-  return pay ? ('full' as const) : ('hold' as const);
+  return 'hold' as const;
 }
 
-/** Listing slots used and allowed right now (the plan's if one is on, else the free ones). */
+/**
+ * Listing slots used and allowed right now: with a plan, listings live or in review out of
+ * the plan limit; without one, the free listings posted so far out of the free total.
+ */
 async function listingSlots(userId: string, role: UserRole) {
   const pay = await currentPlanPayment(userId);
-  if (pay) return { used: pay.postsUsed ?? 0, limit: pay.planSnapshot.listingLimit };
+  if (pay) {
+    return { used: await activeListingCount(userId), limit: pay.planSnapshot.listingLimit };
+  }
   const u = await User.findById(userId).select('freePostsUsed').lean();
   const limit = LISTING_LIMITS[role];
   return { used: Math.min(u?.freePostsUsed ?? 0, limit), limit };

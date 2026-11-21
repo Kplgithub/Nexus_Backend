@@ -26,7 +26,11 @@ import {
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
 import { Property, type PropertyAttrs } from '../models/property.model.js';
-import { claimListingSlot, listingLimitFor } from './billing.service.js';
+import {
+  activeListingCount,
+  claimListingSlot,
+  currentPlanListingLimit,
+} from './billing.service.js';
 import { businessAlert } from './notification.service.js';
 import { Project } from '../models/project.model.js';
 import { Enquiry, PropertyViewDay, SlugRedirect } from '../models/misc.models.js';
@@ -850,26 +854,38 @@ async function ownedDoc(userId: string, id: string) {
 }
 
 /**
- * What happens when the user sends a listing for review. A listing that already used a
- * slot goes straight to review. Otherwise it takes one slot from the plan or the free
- * allowance; with none left and no plan it is saved and waits for a plan ("hold").
+ * What happens when the user sends a listing for review.
+ * With a plan on, the plan limit counts listings live or in review at one time, so every
+ * send (a new listing, or reactivating an old one) needs a free place; the listing itself
+ * is not counted. Without a plan, a listing that already used a slot goes straight to
+ * review, and a new one takes a free slot or is saved to wait for a plan ("hold").
  */
 async function reviewOrHold(
   userId: string,
   role: UserRole,
-  doc?: { slotUsed?: boolean | null; submittedAt?: Date | null },
+  doc?: { _id?: unknown; slotUsed?: boolean | null; submittedAt?: Date | null },
 ) {
+  const exceptId = doc?._id ? String(doc._id) : undefined;
+  const planLimit = await currentPlanListingLimit(userId);
+  if (planLimit !== null) {
+    if ((await activeListingCount(userId, exceptId)) >= planLimit) throw planFull(planLimit);
+    if (doc?.slotUsed || doc?.submittedAt) return 'review' as const;
+    const r = await claimListingSlot(userId, role, exceptId);
+    if (r === 'claimed') return 'claimed' as const;
+    throw planFull(planLimit);
+  }
   if (doc?.slotUsed || doc?.submittedAt) return 'review' as const;
-  const r = await claimListingSlot(userId, role);
+  const r = await claimListingSlot(userId, role, exceptId);
   if (r === 'claimed') return 'claimed' as const;
-  if (r === 'hold') return 'hold' as const;
-  const limit = await listingLimitFor(userId, role);
-  throw new AppError(
+  return 'hold' as const;
+}
+
+const planFull = (limit: number) =>
+  new AppError(
     403,
     'LISTING_LIMIT',
-    `You have posted all ${limit} listings in your plan. Your next plan adds more.`,
+    `You have ${limit} live listings, the most your plan allows. Unlist an old one to add another.`,
   );
-}
 
 /** Tells the team a listing is waiting in the review queue. */
 function reviewAlert(doc: { _id: unknown; title: string; status: string }) {
