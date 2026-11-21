@@ -15,6 +15,8 @@ import {
 } from './helpers.js';
 import { AdminNotification, Payment } from '../src/models/admin-panel.models.js';
 import { Property } from '../src/models/property.model.js';
+import { SiteSettings } from '../src/models/misc.models.js';
+import { clearSettingsCache } from '../src/services/settings.service.js';
 import { expireFeatured } from '../src/services/featured.service.js';
 import { ensureDefaultPlan, razorpaySignatureValid } from '../src/services/billing.service.js';
 import { istDayStart } from '../src/services/charts.service.js';
@@ -515,6 +517,49 @@ describe('plans and payments', () => {
     expect(
       (await request(app).get(`/api/v1/properties/${slug}`)).body.data.property.poster.premium,
     ).toBe(true);
+  });
+
+  it('uses the Featured prices admin sets in Settings', async () => {
+    const agent = await signUpUser(app, 'agent');
+    const before = (await agent.get('/api/v1/me/plans')).body.data.featureAddons;
+    expect(before.map((a: { price: number }) => a.price)).toEqual([49, 99]);
+    // Saved settings keep empty optional fields as null; a price-only change must still work.
+    await SiteSettings.updateOne(
+      { key: 'site' },
+      {
+        $set: {
+          data: {
+            businessName: 'NEXUS Estate',
+            email: null,
+            enquiryNotificationEmail: null,
+            home: { heroImageUrl: null },
+          },
+        },
+      },
+      { upsert: true },
+    );
+    clearSettingsCache();
+    const set = await boss.patch('/api/v1/admin/settings', {
+      featurePrices: { days7: 79, days30: 149 },
+    });
+    expect(set.status).toBe(200);
+    expect(
+      (await boss.patch('/api/v1/admin/settings', { featurePrices: { days7: 0, days30: 149 } }))
+        .status,
+    ).toBe(422);
+    const after = (await agent.get('/api/v1/me/plans')).body.data.featureAddons;
+    expect(after).toEqual([
+      { days: 7, price: 79, label: '7 days' },
+      { days: 30, price: 149, label: '1 month' },
+    ]);
+    const { id } = (await agent.post('/api/v1/me/properties', userListing({ status: 'pending' })))
+      .body.data;
+    await boss.post(`/api/v1/admin/properties/${id}/status`, { status: 'published' });
+    const paid = await boss.post('/api/v1/admin/payments/manual-feature', {
+      propertyId: id,
+      days: 30,
+    });
+    expect(paid.body.data).toMatchObject({ kind: 'featured', amount: 149 });
   });
 
   it('features a live listing for 7 days on a ₹49 payment, which is not a subscription', async () => {

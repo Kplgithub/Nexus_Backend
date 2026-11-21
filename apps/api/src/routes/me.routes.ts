@@ -16,7 +16,6 @@ import {
   PROJECT_STATUSES,
   paymentVerifySchema,
   featureAddonSchema,
-  FEATURE_ADDONS,
   type PropertyCard,
 } from '@nexus/shared';
 import * as billing from '../services/billing.service.js';
@@ -286,7 +285,7 @@ meRouter.get('/plans', async (req, res) => {
     subscription,
     payments,
     usage,
-    featureAddons: FEATURE_ADDONS,
+    featureAddons: await billing.featureAddons(),
     onlineEnabled: razorpayEnabled,
   });
 });

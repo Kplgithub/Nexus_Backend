@@ -306,6 +306,8 @@ export type SiteSettings = {
     showFeatured: boolean;
   };
   allowInternationalEnquiries: boolean;
+  /** Paid Featured prices in rupees (GST included), set by admin. */
+  featurePrices: { days7: number; days30: number };
   /** Admin only. */
   enquiryNotificationEmail?: string;
 };
