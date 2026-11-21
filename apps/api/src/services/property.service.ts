@@ -21,6 +21,7 @@ import {
   type UserPropertyUpdate,
   type UserRole,
   coverFirst,
+  isBusinessRole,
 } from '@nexus/shared';
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
@@ -87,7 +88,7 @@ const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : nul
 export const isPremium = (until?: Date | null) => Boolean(until && new Date(until) > new Date());
 
 export const posterTypeFor = (role: UserRole): PosterType =>
-  role === 'individual' ? 'owner' : role;
+  role === 'agent' || role === 'builder' ? role : 'owner';
 
 const NEXUS_POSTER: ListingPoster = {
   type: 'nexus',
@@ -105,7 +106,7 @@ function posterFrom(p: Lean, u: PosterUser | null | undefined): ListingPoster {
   return {
     type: (p.posterType as PosterType) ?? posterTypeFor(u.role),
     // Owners are shown by first name only; agents and builders by their business name.
-    name: u.role === 'individual' ? u.name.split(' ')[0]! : u.name,
+    name: isBusinessRole(u.role as UserRole) ? u.name : u.name.split(' ')[0]!,
     companyName: u.companyName ?? null,
     verified: Boolean(u.verified),
     premium: isPremium(u.premiumUntil),

@@ -374,18 +374,31 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 /* ---------------- Website users ---------------- */
 
-/** Account types offered at sign-up. "individual" covers buyers, owners and tenants. */
-export const USER_ROLES = ['individual', 'agent', 'builder'] as const;
+/**
+ * Account types offered at sign-up. "seeker" is a buyer or tenant: they browse, save and
+ * enquire, and never see plans. "individual" is a property owner who lists.
+ */
+export const USER_ROLES = ['seeker', 'individual', 'agent', 'builder'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
+/** Roles that post listings, take plans and get leads. */
+export const LISTING_ROLES = ['individual', 'agent', 'builder'] as const;
+export type ListingRole = (typeof LISTING_ROLES)[number];
+
+export const canListProperty = (role: UserRole): role is ListingRole => role !== 'seeker';
+/** Agents and builders: company name, public profile, verification. */
+export const isBusinessRole = (role: UserRole) => role === 'agent' || role === 'builder';
+
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
-  individual: 'Buyer / Owner / Tenant',
+  seeker: 'Buyer / Tenant',
+  individual: 'Owner',
   agent: 'Agent',
   builder: 'Builder',
 };
 
 export const USER_ROLE_DESCRIPTIONS: Record<UserRole, string> = {
-  individual: 'Looking to buy or rent, or own a property you want to sell or rent out.',
+  seeker: 'Looking to buy or rent a property.',
+  individual: 'You own a property you want to sell or rent out.',
   agent: 'A real estate agent or broker listing properties for clients.',
   builder: 'A developer or builder listing projects and units.',
 };
@@ -404,10 +417,16 @@ export const POSTER_LABELS: Record<PosterType, string> = {
  * Free listings (live or under review) a user may hold without a paid plan.
  * Owners get none: they fill in the listing, then take a plan to send it for review.
  */
-export const LISTING_LIMITS: Record<UserRole, number> = { individual: 0, agent: 5, builder: 5 };
+export const LISTING_LIMITS: Record<UserRole, number> = {
+  seeker: 0,
+  individual: 0,
+  agent: 5,
+  builder: 5,
+};
 
 /** Leads a month whose contact details a user sees without a paid plan. */
 export const FREE_LEADS_PER_MONTH: Record<UserRole, number> = {
+  seeker: 0,
   individual: 0,
   agent: 10,
   builder: 10,
@@ -423,7 +442,7 @@ export const DEFAULT_PLAN = {
   leadLimit: 0,
   featuredListings: 0,
   featuredDays: 7,
-  roles: ['individual', 'agent', 'builder'] as UserRole[],
+  roles: [...LISTING_ROLES] as UserRole[],
 } as const;
 
 /** Paid Featured for one live listing, on top of any plan. Rupees, GST included. */
