@@ -13,6 +13,7 @@ import { notFound } from '../lib/errors.js';
 import { paginate } from '../lib/respond.js';
 import type { AuthedUser } from '../middleware/user-auth.js';
 import { notifyNewLead } from './mail.service.js';
+import { businessAlert } from './notification.service.js';
 
 type ReportLean = {
   _id: Types.ObjectId;
@@ -72,6 +73,11 @@ export async function createReport(
     reporterName: user?.name ?? null,
     ipHash: meta.ipHash,
   });
+  void businessAlert(
+    'report',
+    { title: `Listing reported: ${p.title}`, body: input.reason, link: '/admin/reports' },
+    { skipEmail: true },
+  );
   void notifyNewLead(`Listing reported: ${p.title}`, {
     Reason: input.reason,
     Details: input.details,

@@ -1,5 +1,5 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
-import { OTP_PURPOSES, USER_ROLES, USER_STATUSES } from '@nexus/shared';
+import { OTP_PURPOSES, USER_ROLES, USER_STATUSES, VERIFICATION_STATUSES } from '@nexus/shared';
 
 /**
  * Website users: buyers/owners/tenants ("individual"), agents and builders.
@@ -42,6 +42,10 @@ const userSchema = new Schema(
     whatsappEnabled: { type: Boolean, default: true },
     /** Set by the NEXUS team after checking an agent's or builder's credentials. */
     verified: { type: Boolean, default: false },
+    verificationStatus: { type: String, enum: VERIFICATION_STATUSES, default: 'unverified' },
+    verifiedAt: { type: Date, default: null },
+    verifiedBy: { type: String, maxlength: 80, default: null },
+    verificationNote: { type: String, maxlength: 1000, default: null },
 
     status: { type: String, enum: USER_STATUSES, default: 'active' },
     saved: { type: [Schema.Types.ObjectId], ref: 'Property', default: [] },
@@ -65,6 +69,7 @@ const userSchema = new Schema(
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1, status: 1, createdAt: -1 });
+userSchema.index({ role: 1, verificationStatus: 1, createdAt: -1 });
 userSchema.index({ profileSlug: 1 }, { unique: true, sparse: true });
 
 export type UserAttrs = InferSchemaType<typeof userSchema>;

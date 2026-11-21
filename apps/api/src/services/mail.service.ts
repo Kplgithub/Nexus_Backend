@@ -25,12 +25,15 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 export async function notifyNewLead(
   subject: string,
   fields: Record<string, string | null | undefined>,
+  extraTo: string[] = [],
 ) {
   const t = getTransport();
   if (!t) return;
   const settings = await getSettings();
-  const to = settings.enquiryNotificationEmail;
-  if (!to) return;
+  const to = [
+    ...new Set([settings.enquiryNotificationEmail, ...extraTo].filter((x): x is string => !!x)),
+  ];
+  if (!to.length) return;
   const rows = Object.entries(fields)
     .filter(([, v]) => v)
     .map(

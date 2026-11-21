@@ -7,6 +7,7 @@ import {
   type profileUpdateSchema,
   type signupSchema,
 } from '@nexus/shared';
+import { businessAlert } from './notification.service.js';
 import { env, mailEnabled, otpEnabled } from '../config/env.js';
 import { AppError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.js';
 import { randomToken, sha256 } from '../lib/crypto.js';
@@ -116,7 +117,15 @@ export async function signup(input: z.output<typeof signupSchema>, ipHash?: stri
         : await uniqueProfileSlug(input.companyName?.trim() || input.name),
     termsAcceptedAt: new Date(),
     signupIpHash: ipHash,
+    verificationStatus: input.role === 'individual' ? 'unverified' : 'pending',
   });
+  if (input.role !== 'individual') {
+    void businessAlert('signup', {
+      title: `New ${input.role} signed up: ${input.companyName?.trim() || input.name}`,
+      body: 'Check their details and verify the profile.',
+      link: '/admin/verification',
+    });
+  }
   return user;
 }
 

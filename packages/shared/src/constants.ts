@@ -502,3 +502,57 @@ export const BLOG_CATEGORY_LABELS: Record<BlogCategory, string> = {
 
 /** Slugs the blog uses for its own pages, so no post can take them. */
 export const BLOG_RESERVED_SLUGS = ['category', 'tag', 'page', 'feed', 'rss'] as const;
+
+/* ---------------- Admin panel: roles, visits, verification, plans ---------------- */
+
+/**
+ * Staff roles as people see them. "owner" and "admin" are both Super Admins (full
+ * access); "editor" is a Sub-admin who runs listings, leads and content but cannot
+ * delete, export, manage the team, change passwords or touch settings and payments.
+ */
+export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
+  owner: 'Super Admin',
+  admin: 'Super Admin',
+  editor: 'Sub-admin',
+};
+/** Roles offered when adding a team member. */
+export const TEAM_ROLES = ['owner', 'editor'] as const;
+export type TeamRole = (typeof TEAM_ROLES)[number];
+export const isSuperAdmin = (role: AdminRole) => role === 'owner' || role === 'admin';
+
+export const SITE_VISIT_STATUSES = ['scheduled', 'done', 'cancelled', 'no-show'] as const;
+export type SiteVisitStatus = (typeof SITE_VISIT_STATUSES)[number];
+export const SITE_VISIT_STATUS_LABELS: Record<SiteVisitStatus, string> = {
+  scheduled: 'Scheduled',
+  done: 'Done',
+  cancelled: 'Cancelled',
+  'no-show': 'No-show',
+};
+
+export const VERIFICATION_STATUSES = ['unverified', 'pending', 'verified', 'rejected'] as const;
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+export const VERIFICATION_STATUS_LABELS: Record<VerificationStatus, string> = {
+  unverified: 'Not checked',
+  pending: 'Waiting for check',
+  verified: 'Verified',
+  rejected: 'Rejected',
+};
+
+/** How long a listing stays featured when an admin features it. */
+export const FEATURE_DAYS = [7, 15, 30, 60, 90] as const;
+
+export const PAYMENT_STATUSES = ['created', 'paid', 'failed', 'refunded'] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+export const PAYMENT_METHODS = ['online', 'manual'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export const ALERT_EVENTS = ['lead', 'listing', 'report', 'signup', 'payment', 'visit'] as const;
+export type AlertEvent = (typeof ALERT_EVENTS)[number];
+export const ALERT_EVENT_LABELS: Record<AlertEvent, string> = {
+  lead: 'New enquiry',
+  listing: 'Listing sent for review',
+  report: 'Listing reported',
+  signup: 'New agent or builder signed up',
+  payment: 'Payment received',
+  visit: 'Site visit booked',
+};
