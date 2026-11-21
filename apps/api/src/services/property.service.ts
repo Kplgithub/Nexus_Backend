@@ -29,7 +29,8 @@ import { Property, type PropertyAttrs } from '../models/property.model.js';
 import { claimListingSlot, listingLimitFor } from './billing.service.js';
 import { businessAlert } from './notification.service.js';
 import { Project } from '../models/project.model.js';
-import { Enquiry, SlugRedirect } from '../models/misc.models.js';
+import { Enquiry, PropertyViewDay, SlugRedirect } from '../models/misc.models.js';
+import { indiaDay } from '../lib/india-day.js';
 import { User } from '../models/user.model.js';
 import {
   AppError,
@@ -494,7 +495,17 @@ export async function listHomeSections() {
 
 /** Counts a detail-page view. Called from the browser so cached pages still count. */
 export async function recordView(id: string) {
-  await Property.updateOne({ _id: id, ...VISIBLE }, { $inc: { views: 1 } });
+  const doc = await Property.findOneAndUpdate(
+    { _id: id, ...VISIBLE },
+    { $inc: { views: 1 } },
+    { projection: { postedBy: 1 } },
+  ).lean<{ _id: Types.ObjectId; postedBy?: Types.ObjectId | null }>();
+  if (!doc) return;
+  await PropertyViewDay.updateOne(
+    { property: doc._id, day: indiaDay() },
+    { $inc: { n: 1 }, $setOnInsert: { owner: doc.postedBy ?? null } },
+    { upsert: true },
+  );
 }
 
 /** Lightweight list for the XML sitemap. Demo listings are noindex, so they are excluded. */

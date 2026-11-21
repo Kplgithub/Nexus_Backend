@@ -1,13 +1,15 @@
 import { Types } from 'mongoose';
 import {
   PROPERTY_STATUSES,
+  type DashboardPerformance,
   type DashboardStats,
   type PropertyStatus,
   type UserDashboard,
   type UserRole,
 } from '@nexus/shared';
 import { Property } from '../models/property.model.js';
-import { Enquiry } from '../models/misc.models.js';
+import { Enquiry, PropertyViewDay } from '../models/misc.models.js';
+import { indiaDay, indiaDayStart, lastIndiaDays } from '../lib/india-day.js';
 import { User } from '../models/user.model.js';
 import { listLeadsForOwner } from './enquiry.service.js';
 import { activeSubscription, listingLimitFor, usageFor } from './billing.service.js';
@@ -130,5 +132,59 @@ export async function getUserDashboard(userId: string, role: UserRole): Promise<
     recentLeads: recent.items,
     subscription: await activeSubscription(userId),
     usage: await usageFor(userId, role),
+    performance: await performanceFor(uid),
+  };
+}
+
+/** Daily views and leads for one poster: 14-day series plus 30-day totals vs the 30 days before. */
+export async function performanceFor(
+  uid: Types.ObjectId,
+  now: Date = new Date(),
+): Promise<DashboardPerformance> {
+  const sixty = lastIndiaDays(60, now);
+  const from = sixty[0]!;
+  const fromDate = indiaDayStart(from);
+  const [viewRows, leadRows] = await Promise.all([
+    PropertyViewDay.aggregate<{ _id: string; n: number }>([
+      { $match: { owner: uid, day: { $gte: from } } },
+      { $group: { _id: '$day', n: { $sum: '$n' } } },
+    ]),
+    Enquiry.aggregate<{ _id: { day: string; type: string }; n: number }>([
+      { $match: { listingOwner: uid, status: { $ne: 'spam' }, createdAt: { $gte: fromDate } } },
+      {
+        $group: {
+          _id: {
+            day: {
+              $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' },
+            },
+            type: '$type',
+          },
+          n: { $sum: 1 },
+        },
+      },
+    ]),
+  ]);
+  const views = new Map(viewRows.map((r) => [r._id, r.n]));
+  const leads = new Map<string, number>();
+  const contacts = new Map<string, number>();
+  for (const r of leadRows) {
+    leads.set(r._id.day, (leads.get(r._id.day) ?? 0) + r.n);
+    if (r._id.type === 'contact') contacts.set(r._id.day, (contacts.get(r._id.day) ?? 0) + r.n);
+  }
+  const sum = (m: Map<string, number>, days: string[]) =>
+    days.reduce((a, d) => a + (m.get(d) ?? 0), 0);
+  const prev = sixty.slice(0, 30);
+  const last = sixty.slice(30);
+  const days = sixty.slice(-14);
+  return {
+    days,
+    views: days.map((d) => views.get(d) ?? 0),
+    leads: days.map((d) => leads.get(d) ?? 0),
+    views30: sum(views, last),
+    viewsPrev30: sum(views, prev),
+    leads30: sum(leads, last),
+    leadsPrev30: sum(leads, prev),
+    leadsToday: leads.get(indiaDay(now)) ?? 0,
+    contacts30: sum(contacts, last),
   };
 }

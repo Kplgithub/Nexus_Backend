@@ -18,6 +18,7 @@ await runScript('db:indexes', async () => {
     models.AuditLog,
     models.Counter,
     models.Report,
+    models.PropertyViewDay,
     Project,
     BlogPost,
     BlogRead,

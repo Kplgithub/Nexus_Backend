@@ -436,6 +436,22 @@ export type UserDashboard = {
   recentLeads: ReceivedLead[];
   subscription: MySubscription;
   usage: PlanUsage;
+  performance: DashboardPerformance;
+};
+
+/** Views and leads across all of a poster's listings, for the dashboard chart and cards. */
+export type DashboardPerformance = {
+  /** The last 14 days (India time), oldest first, as YYYY-MM-DD. */
+  days: string[];
+  views: number[];
+  leads: number[];
+  views30: number;
+  viewsPrev30: number;
+  leads30: number;
+  leadsPrev30: number;
+  leadsToday: number;
+  /** Leads that came from someone viewing the number, last 30 days. */
+  contacts30: number;
 };
 
 /** What a user has used of their free allowance or plan. */

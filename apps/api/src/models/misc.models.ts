@@ -240,3 +240,19 @@ const reportSchema = new Schema(
 reportSchema.index({ status: 1, createdAt: -1 });
 reportSchema.index({ property: 1, ipHash: 1, createdAt: -1 });
 export const Report = model('Report', reportSchema);
+
+/* ---------------- Daily listing views (for the poster's dashboard chart) ---------------- */
+const propertyViewDaySchema = new Schema(
+  {
+    property: { type: Schema.Types.ObjectId, ref: 'Property', required: true },
+    /** The website user who posted the listing; null for NEXUS team listings. */
+    owner: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    /** Calendar day in India time, YYYY-MM-DD. */
+    day: { type: String, required: true, maxlength: 10 },
+    n: { type: Number, default: 0 },
+  },
+  { versionKey: false },
+);
+propertyViewDaySchema.index({ property: 1, day: 1 }, { unique: true });
+propertyViewDaySchema.index({ owner: 1, day: 1 });
+export const PropertyViewDay = model('PropertyViewDay', propertyViewDaySchema);
