@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# One deploy at a time: two overlapping builds on the server break each other.
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
