@@ -10,6 +10,8 @@ import {
   type adminEnquiryQuerySchema,
   type enquiryCreateSchema,
   type enquiryUpdateSchema,
+  isBusinessRole,
+  type UserRole,
 } from '@nexus/shared';
 import { Admin, Enquiry } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
@@ -629,7 +631,7 @@ export async function revealContact(propertyId: string, viewer: AuthedUser, meta
     });
   }
   const contact = {
-    name: poster.role === 'individual' ? poster.name : poster.companyName || poster.name,
+    name: isBusinessRole(poster.role as UserRole) ? poster.companyName || poster.name : poster.name,
     contactPerson: poster.name,
     phone: poster.phone,
     whatsapp: poster.whatsappEnabled ? poster.phone : null,

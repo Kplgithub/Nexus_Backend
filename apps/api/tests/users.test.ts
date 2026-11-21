@@ -12,6 +12,7 @@ import {
   userListing,
 } from './helpers.js';
 import { User } from '../src/models/user.model.js';
+import { migrateSeekers } from '../src/services/user.service.js';
 import { Enquiry } from '../src/models/misc.models.js';
 
 let app: Express;
@@ -352,7 +353,7 @@ describe('saved, leads and contact', () => {
       .send({ ...details, code: start.body.data.devCode });
     expect(ok.status).toBe(200);
     expect(ok.body.data.created).toBe(true);
-    expect(ok.body.data.user).toMatchObject({ role: 'individual', phoneVerified: true });
+    expect(ok.body.data.user).toMatchObject({ role: 'seeker', phoneVerified: true });
     const u = await User.findOne({ email: 'amit@example.test' }).lean();
     expect(u!.signupIntent).toBe('tenant');
 
@@ -364,6 +365,17 @@ describe('saved, leads and contact', () => {
     const shown = await visitor.post(`/api/v1/me/contact/${id}`).set('X-CSRF-Token', csrf);
     expect(shown.status).toBe(200);
     expect(shown.body.data.phone).toBe(poster.user.phone);
+
+    // A buyer or tenant never gets plans, listings or leads until they switch to owner.
+    for (const path of ['/api/v1/me/plans', '/api/v1/me/properties', '/api/v1/me/leads']) {
+      const r = await visitor.get(path);
+      expect(r.status).toBe(403);
+      expect(r.body.error.code).toBe('OWNER_ACCOUNT_NEEDED');
+    }
+    const switched = await visitor.post('/api/v1/me/become-owner').set('X-CSRF-Token', csrf);
+    expect(switched.status).toBe(200);
+    expect(switched.body.data.user.role).toBe('individual');
+    expect((await visitor.get('/api/v1/me/plans')).status).toBe(200);
 
     // The same number later signs in instead of creating a second account.
     const again = request.agent(app);
@@ -381,6 +393,45 @@ describe('saved, leads and contact', () => {
       .post('/api/v1/auth/quick/start')
       .send({ ...details, phone: '98290 55443', intent: 'broker' });
     expect(taken.status).toBe(409);
+  });
+
+  it('moves popup buyers and tenants without listings to the seeker account type', async () => {
+    const { poster } = await liveListing();
+    await User.updateOne({ _id: poster.user.id }, { role: 'individual', signupIntent: 'tenant' });
+    const tenant = await User.create({
+      role: 'individual',
+      name: 'Old Tenant',
+      email: 'old-tenant@example.test',
+      phone: '+919829011122',
+      passwordHash: 'x',
+      signupIntent: 'buyer',
+      termsAcceptedAt: new Date(),
+    });
+    const owner = await User.create({
+      role: 'individual',
+      name: 'Plain Owner',
+      email: 'plain-owner@example.test',
+      phone: '+919829011133',
+      passwordHash: 'x',
+      termsAcceptedAt: new Date(),
+    });
+    expect(await migrateSeekers()).toBe(1);
+    expect((await User.findById(tenant._id).lean())!.role).toBe('seeker');
+    expect((await User.findById(owner._id).lean())!.role).toBe('individual');
+    // Has a listing, so stays an owner even though they picked "tenant".
+    expect((await User.findById(poster.user.id).lean())!.role).toBe('individual');
+    expect(await migrateSeekers()).toBe(0);
+  });
+
+  it('lets a buyer or tenant sign up, save and enquire but not list or see plans', async () => {
+    const { id } = await liveListing();
+    const seeker = await signUpUser(app, 'seeker');
+    expect((await seeker.get('/api/v1/me')).body.data.user.role).toBe('seeker');
+    expect((await seeker.put(`/api/v1/me/saved/${id}`)).status).toBe(200);
+    const post = await seeker.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    expect(post.status).toBe(403);
+    expect(post.body.error.code).toBe('OWNER_ACCOUNT_NEEDED');
+    expect((await seeker.post(`/api/v1/me/plans/x/checkout`)).status).toBe(403);
   });
 
   it('respects a poster who hides their number', async () => {

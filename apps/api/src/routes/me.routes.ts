@@ -23,7 +23,12 @@ import * as billing from '../services/billing.service.js';
 import { limiters } from '../middleware/security.js';
 import { razorpayEnabled } from '../config/env.js';
 import { onlySentKeys, parseBody, parseId, parseQuery } from '../middleware/validate.js';
-import { clearUserSession, issueUserSession, requireUser } from '../middleware/user-auth.js';
+import {
+  clearUserSession,
+  issueUserSession,
+  requireLister,
+  requireUser,
+} from '../middleware/user-auth.js';
 import { created, ok } from '../lib/respond.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { hashIp } from '../lib/crypto.js';
@@ -44,6 +49,8 @@ meRouter.use((_req, res, next) => {
   next();
 });
 meRouter.use(requireUser);
+// Listing, leads and plans are for owners, agents and builders only.
+meRouter.use(['/properties', '/uploads', '/leads', '/plans', '/payments'], requireLister);
 
 const pageQuery = z.object({
   page: z.coerce.number().int().min(1).max(10_000).catch(1).default(1),
@@ -77,6 +84,13 @@ meRouter.post('/change-password', limiters.userLogin, async (req, res) => {
   const user = await users.changeUserPassword(req.user!.id, currentPassword, newPassword);
   issueUserSession(res, { id: String(user._id), role: user.role, tokenVersion: user.tokenVersion });
   ok(res, { changed: true });
+});
+
+/** A buyer or tenant who wants to list their own property becomes an owner. */
+meRouter.post('/become-owner', limiters.userWrite, async (req, res) => {
+  const user = await users.becomeOwner(req.user!.id);
+  issueUserSession(res, { id: user.id, role: user.role, tokenVersion: user.tokenVersion });
+  ok(res, { user: await users.getMe(user.id) });
 });
 
 meRouter.post('/logout-all', async (req, res) => {

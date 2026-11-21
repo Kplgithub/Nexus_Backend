@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import {
+  isBusinessRole,
   normalizePhone,
   slugify,
   type SessionUser,
@@ -15,6 +16,7 @@ import { AppError, badRequest, conflict, notFound, unauthorized } from '../lib/e
 import { randomToken, sha256 } from '../lib/crypto.js';
 import { User, type UserAttrs } from '../models/user.model.js';
 import { City } from '../models/misc.models.js';
+import { Property } from '../models/property.model.js';
 import { burnTime, hashPassword, passwordNeedsRehash, verifyPassword } from './auth.service.js';
 import { sendOtp, verifyOtp } from './otp.service.js';
 import { sendMail } from './mail.service.js';
@@ -110,18 +112,17 @@ export async function signup(input: z.output<typeof signupSchema>, ipHash?: stri
     email: input.email,
     phone,
     passwordHash: await hashPassword(input.password),
-    companyName: input.role === 'individual' ? null : input.companyName?.trim() || null,
+    companyName: isBusinessRole(input.role) ? input.companyName?.trim() || null : null,
     reraNumber: input.reraNumber?.trim() || null,
     citySlug,
-    profileSlug:
-      input.role === 'individual'
-        ? undefined
-        : await uniqueProfileSlug(input.companyName?.trim() || input.name),
+    profileSlug: isBusinessRole(input.role)
+      ? await uniqueProfileSlug(input.companyName?.trim() || input.name)
+      : undefined,
     termsAcceptedAt: new Date(),
     signupIpHash: ipHash,
-    verificationStatus: input.role === 'individual' ? 'unverified' : 'pending',
+    verificationStatus: isBusinessRole(input.role) ? 'pending' : 'unverified',
   });
-  if (input.role !== 'individual') {
+  if (isBusinessRole(input.role)) {
     void businessAlert('signup', {
       title: `New ${input.role} signed up: ${input.companyName?.trim() || input.name}`,
       body: 'Check their details and verify the profile.',
@@ -317,7 +318,7 @@ export async function updateProfile(userId: string, patch: z.output<typeof profi
       patch.citySlug && (await City.exists({ slug: patch.citySlug })) ? patch.citySlug : null;
   }
   if (patch.name) user.name = patch.name;
-  if (patch.companyName !== undefined && user.role !== 'individual') {
+  if (patch.companyName !== undefined && isBusinessRole(user.role as UserRole)) {
     if (!patch.companyName.trim()) {
       throw badRequest('Company name is required', { companyName: ['This field is required'] });
     }
@@ -327,7 +328,7 @@ export async function updateProfile(userId: string, patch: z.output<typeof profi
   if (patch.about !== undefined) user.about = patch.about.trim() || null;
   if (patch.showPhone !== undefined) user.showPhone = patch.showPhone;
   if (patch.whatsappEnabled !== undefined) user.whatsappEnabled = patch.whatsappEnabled;
-  if (user.role !== 'individual') {
+  if (isBusinessRole(user.role as UserRole)) {
     if (patch.experienceYears !== undefined) user.experienceYears = patch.experienceYears;
     if (patch.website !== undefined) user.website = patch.website || null;
     if (patch.logoUrl !== undefined) user.logoUrl = patch.logoUrl || null;
@@ -362,7 +363,43 @@ export async function signOutUserEverywhere(userId: string) {
 
 /* ---------------- Quick sign-up from the "view number" popup ---------------- */
 
-const intentRole = (intent: string): UserRole => (intent === 'broker' ? 'agent' : 'individual');
+/** Broker → agent, owner → owner account, buyer or tenant → seeker (never sees plans). */
+const intentRole = (intent: string): UserRole =>
+  intent === 'broker' ? 'agent' : intent === 'owner' ? 'individual' : 'seeker';
+
+/** A buyer or tenant switches to an owner account so they can list a property. */
+export async function becomeOwner(userId: string) {
+  const user = await User.findById(userId);
+  if (!user) throw unauthorized();
+  if (user.role === 'seeker') {
+    user.role = 'individual';
+    await user.save();
+  }
+  return { id: String(user._id), role: user.role as UserRole, tokenVersion: user.tokenVersion };
+}
+
+/**
+ * One-off, safe to repeat: accounts made from the number popup as a buyer or tenant
+ * become seekers, unless they already posted a listing.
+ */
+export async function migrateSeekers() {
+  const candidates = await User.find({
+    role: 'individual',
+    signupIntent: { $in: ['tenant', 'buyer'] },
+  })
+    .select('_id')
+    .lean();
+  if (!candidates.length) return 0;
+  const posters = new Set(
+    (await Property.distinct('postedBy', { postedBy: { $in: candidates.map((c) => c._id) } })).map(
+      String,
+    ),
+  );
+  const ids = candidates.filter((c) => !posters.has(String(c._id))).map((c) => c._id);
+  if (!ids.length) return 0;
+  const r = await User.updateMany({ _id: { $in: ids }, role: 'individual' }, { role: 'seeker' });
+  return r.modifiedCount;
+}
 
 /**
  * Step 1: sends an OTP to the visitor's mobile. A known number signs in with it; a new

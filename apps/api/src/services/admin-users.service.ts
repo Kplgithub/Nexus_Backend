@@ -1,3 +1,4 @@
+import { isBusinessRole, type UserRole } from '@nexus/shared';
 import type { FilterQuery } from 'mongoose';
 import type { z } from 'zod';
 import type {
@@ -176,7 +177,8 @@ export async function decideVerification(
 ) {
   const u = await User.findById(id);
   if (!u) throw notFound('User not found');
-  if (u.role === 'individual') throw badRequest('Only agents and builders are verified');
+  if (!isBusinessRole(u.role as UserRole))
+    throw badRequest('Only agents and builders are verified');
   if (input.decision === 'rejected' && !input.note)
     throw badRequest('Write the reason so they know what to fix', { note: ['Required'] });
   u.verificationStatus = input.decision;

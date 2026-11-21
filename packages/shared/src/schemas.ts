@@ -23,6 +23,7 @@ import {
   POSSESSION_STATUSES,
   TRANSACTION_TYPES,
   USER_ROLES,
+  LISTING_ROLES,
   USER_SETTABLE_STATUSES,
   USER_STATUSES,
   ENQUIRY_TYPES,
@@ -1202,7 +1203,7 @@ export const planSchema = z.object({
   featuredDays: z.number().int().min(1).max(90).default(7),
   /** Leads with contact details per plan period. 0 means no limit. */
   leadLimit: z.number().int().min(0).max(100_000).default(0),
-  roles: z.array(z.enum(USER_ROLES)).min(1),
+  roles: z.array(z.enum(LISTING_ROLES)).min(1),
   active: z.boolean().default(true),
   sortOrder: z.number().int().min(0).max(1000).default(0),
 });

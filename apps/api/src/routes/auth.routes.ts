@@ -1,3 +1,4 @@
+import type { UserRole } from '@nexus/shared';
 import { Router, type Router as RouterType } from 'express';
 import {
   forgotPasswordSchema,
@@ -29,7 +30,7 @@ authRouter.use((_req, res, next) => {
 
 const sessionFor = (u: { _id: unknown; role: string; tokenVersion: number }) => ({
   id: String(u._id),
-  role: u.role as 'individual' | 'agent' | 'builder',
+  role: u.role as UserRole,
   tokenVersion: u.tokenVersion,
 });
 

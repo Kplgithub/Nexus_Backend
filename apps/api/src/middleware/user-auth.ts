@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import type { UserRole } from '@nexus/shared';
+import { canListProperty, type UserRole } from '@nexus/shared';
 import { env } from '../config/env.js';
-import { forbidden, unauthorized } from '../lib/errors.js';
+import { AppError, forbidden, unauthorized } from '../lib/errors.js';
 import { randomToken, safeEqual } from '../lib/crypto.js';
 import { User } from '../models/user.model.js';
 import { CSRF_HEADER, cookieBase } from './auth.js';
@@ -116,7 +116,19 @@ export async function optionalUser(req: Request, _res: Response, next: NextFunct
   next();
 }
 
-/** Restrict to listing posters. Every role may post (individuals as owners). */
+/** Buyers and tenants cannot post, see leads or take plans; owners, agents and builders can. */
+export function requireLister(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user) throw unauthorized();
+  if (!canListProperty(req.user.role))
+    throw new AppError(
+      403,
+      'OWNER_ACCOUNT_NEEDED',
+      'To list a property, switch your account to an owner account.',
+    );
+  next();
+}
+
+/** Restrict to the given roles. */
 export function requireRoles(...roles: UserRole[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) throw unauthorized();

@@ -134,7 +134,7 @@ export const nextPhone = () => `98290${String(10000 + ++phoneSeq).slice(-5)}`;
 /** Signs up a website user and returns a cookie-carrying agent that sends the user CSRF token. */
 export async function signUpUser(
   app: Express,
-  role: 'individual' | 'agent' | 'builder' = 'individual',
+  role: 'seeker' | 'individual' | 'agent' | 'builder' = 'individual',
   overrides: Record<string, unknown> = {},
 ) {
   const agent = request.agent(app);

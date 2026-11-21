@@ -4,6 +4,7 @@ import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { expireFeatured } from './services/featured.service.js';
 import { ensureDefaultPlan, sendPlanReminders } from './services/billing.service.js';
+import { migrateSeekers } from './services/user.service.js';
 
 async function main() {
   await connectDb();
@@ -15,6 +16,10 @@ async function main() {
   server.headersTimeout = 66_000;
 
   await ensureDefaultPlan().catch((err) => logger.warn({ err }, 'default plan'));
+  // Buyers and tenants from the number popup get their own account type.
+  await migrateSeekers()
+    .then((n) => n && logger.info({ n }, 'buyer/tenant accounts moved to seeker'))
+    .catch((err) => logger.warn({ err }, 'seeker migration'));
 
   // Featured placements end on their date; plan-ending reminders go out.
   const sweep = () => {
