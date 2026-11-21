@@ -24,7 +24,7 @@ import {
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
 import { Property, type PropertyAttrs } from '../models/property.model.js';
-import { listingLimitFor } from './billing.service.js';
+import { activeSubscription, listingLimitFor } from './billing.service.js';
 import { businessAlert } from './notification.service.js';
 import { Project } from '../models/project.model.js';
 import { Enquiry, SlugRedirect } from '../models/misc.models.js';
@@ -51,6 +51,7 @@ type PosterUser = {
   role: UserRole;
   companyName?: string | null;
   verified?: boolean;
+  premiumUntil?: Date | null;
   showPhone?: boolean;
   email?: string;
   phone?: string;
@@ -82,6 +83,8 @@ const PLOT_TYPES = ['plot', 'industrial-land'];
 
 const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
+export const isPremium = (until?: Date | null) => Boolean(until && new Date(until) > new Date());
+
 export const posterTypeFor = (role: UserRole): PosterType =>
   role === 'individual' ? 'owner' : role;
 
@@ -90,6 +93,7 @@ const NEXUS_POSTER: ListingPoster = {
   name: null,
   companyName: null,
   verified: true,
+  premium: false,
   canRevealPhone: false,
   memberSince: null,
   profilePath: null,
@@ -103,6 +107,7 @@ function posterFrom(p: Lean, u: PosterUser | null | undefined): ListingPoster {
     name: u.role === 'individual' ? u.name.split(' ')[0]! : u.name,
     companyName: u.companyName ?? null,
     verified: Boolean(u.verified),
+    premium: isPremium(u.premiumUntil),
     canRevealPhone: Boolean(u.showPhone),
     memberSince: iso(u.createdAt ?? null),
     profilePath: profilePathFor(u.role, u.profileSlug),
@@ -265,6 +270,8 @@ function toOwn(p: Lean, enquiryCount = 0): OwnListing {
     createdAt: iso(p.createdAt)!,
     enquiryCount,
     projectId: p.projectId ? String(p.projectId) : null,
+    awaitingPlan: Boolean(p.awaitingPlan),
+    featuredUntil: iso(p.featuredUntil ?? null),
   };
 }
 
@@ -291,7 +298,7 @@ async function postersById(ids: (Types.ObjectId | null | undefined)[]) {
   const unique = [...new Set(ids.filter(Boolean).map(String))];
   if (!unique.length) return new Map<string, PosterUser>();
   const users = await User.find({ _id: { $in: unique } })
-    .select('name role companyName verified showPhone email phone createdAt profileSlug')
+    .select('name role companyName verified premiumUntil showPhone email phone createdAt profileSlug')
     .lean<PosterUser[]>();
   return new Map(users.map((u) => [String(u._id), u]));
 }
@@ -845,6 +852,26 @@ async function assertUnderLimit(userId: string, role: UserRole, excludeId?: Type
   }
 }
 
+/**
+ * Where a listing the user sends for review goes: straight to review when they have room,
+ * or saved as a draft that waits for a plan when they are on the free allowance. With a
+ * plan already on and no room left, it is an error.
+ */
+async function reviewOrHold(userId: string, role: UserRole, excludeId?: Types.ObjectId) {
+  const [active, limit] = await Promise.all([
+    Property.countDocuments({
+      postedBy: userId,
+      status: { $in: ACTIVE_FOR_LIMIT },
+      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    }),
+    listingLimitFor(userId, role),
+  ]);
+  if (active < limit) return 'review' as const;
+  if (!(await activeSubscription(userId))) return 'hold' as const;
+  await assertUnderLimit(userId, role, excludeId);
+  return 'review' as const;
+}
+
 /** Tells the team a listing is waiting in the review queue. */
 function reviewAlert(doc: { _id: unknown; title: string; status: string }) {
   if (doc.status !== 'pending') return;
@@ -873,7 +900,9 @@ export async function createMine(
   user: { id: string; role: UserRole },
   input: UserPropertyCreate,
 ): Promise<OwnListing> {
-  if (input.status === 'pending') await assertUnderLimit(user.id, user.role);
+  const hold =
+    input.status === 'pending' && (await reviewOrHold(user.id, user.role)) === 'hold';
+  if (hold) input = { ...input, status: 'draft' };
   const loc = await resolveLocation(input.citySlug, input.localitySlug, { activeOnly: true });
   await checkProject(input.projectId, input.citySlug);
   const doc = await Property.create({
@@ -886,6 +915,7 @@ export async function createMine(
     postedBy: user.id,
     posterType: posterTypeFor(user.role),
     ...statusSideEffects({}, input.status),
+    awaitingPlan: hold,
     createdBy: user.id,
     updatedBy: user.id,
   });
@@ -913,11 +943,19 @@ export async function updateMine(
   }
   const next: UserPropertyUpdate = { ...patch };
   const wasLive = doc.status === 'published';
-  if (patch.status === 'pending' || wasLive) {
+  let hold = false;
+  if (wasLive) {
     await assertUnderLimit(user.id, user.role, doc._id);
     next.status = 'pending';
+  } else if (patch.status === 'pending') {
+    hold = (await reviewOrHold(user.id, user.role, doc._id)) === 'hold';
+    if (hold) next.status = 'draft';
   }
   await applyUpdate(doc, next, user.id);
+  if (hold || doc.awaitingPlan) {
+    doc.awaitingPlan = hold;
+    await doc.save();
+  }
   if (wasLive || next.status === 'pending') {
     doc.moderationNote = undefined;
     await doc.save();
@@ -946,8 +984,16 @@ export async function setMyStatus(
   if (!allowed.includes(status)) {
     throw badRequest(`A listing that is ${doc.status} cannot be changed to ${status}`);
   }
-  if (status === 'pending') await assertUnderLimit(user.id, user.role, doc._id);
+  if (status === 'pending' && (await reviewOrHold(user.id, user.role, doc._id)) === 'hold') {
+    doc.awaitingPlan = true;
+    await doc.save();
+    return getMine(user.id, id);
+  }
   await applyUpdate(doc, { status } as PropertyUpdate, user.id);
+  if (doc.awaitingPlan) {
+    doc.awaitingPlan = false;
+    await doc.save();
+  }
   reviewAlert(doc);
   return getMine(user.id, id);
 }

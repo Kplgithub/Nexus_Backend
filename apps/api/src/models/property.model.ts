@@ -133,6 +133,10 @@ const propertySchema = new Schema(
     featured: { type: Boolean, default: false },
     /** Featured placement ends here; null means until removed by hand. */
     featuredUntil: { type: Date, default: null },
+    /** When the poster featured it using their plan (counts against the plan's featured listings). */
+    selfFeaturedAt: { type: Date, default: null },
+    /** Complete and saved, but the poster must take a plan before it goes for review. */
+    awaitingPlan: { type: Boolean, default: false },
     /** Checked by the NEXUS team (site visit / documents). Shown as a badge. */
     verified: { type: Boolean, default: false },
     /** Demo listings are labelled on the site and removable with one command. */

@@ -1182,6 +1182,10 @@ export const planSchema = z.object({
   durationDays: z.number().int().min(1).max(730),
   listingLimit: z.number().int().min(1).max(10_000),
   featuredListings: z.number().int().min(0).max(1000).default(0),
+  /** How long each featured listing stays featured. */
+  featuredDays: z.number().int().min(1).max(90).default(7),
+  /** Leads with contact details per plan period. 0 means no limit. */
+  leadLimit: z.number().int().min(0).max(100_000).default(0),
   roles: z.array(z.enum(USER_ROLES)).min(1),
   active: z.boolean().default(true),
   sortOrder: z.number().int().min(0).max(1000).default(0),

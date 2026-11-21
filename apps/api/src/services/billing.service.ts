@@ -2,8 +2,12 @@ import crypto from 'node:crypto';
 import { Types, type FilterQuery } from 'mongoose';
 import type { z } from 'zod';
 import {
+  DEFAULT_PLAN,
+  FREE_LEADS_PER_MONTH,
   LISTING_LIMITS,
+  PLAN_REMINDER_DAYS,
   type CheckoutOrder,
+  type PlanUsage,
   type MySubscription,
   type Payment as PaymentDto,
   type PaymentSummary,
@@ -20,7 +24,9 @@ import { AppError, badRequest, notFound } from '../lib/errors.js';
 import { escapeRegex, paginate } from '../lib/respond.js';
 import { Payment, Plan } from '../models/admin-panel.models.js';
 import { User } from '../models/user.model.js';
-import { businessAlert } from './notification.service.js';
+import { Property } from '../models/property.model.js';
+import { Enquiry } from '../models/misc.models.js';
+import { businessAlert, sendWhatsApp } from './notification.service.js';
 import { sendMail } from './mail.service.js';
 
 const DAY = 86_400_000;
@@ -35,6 +41,8 @@ type PlanLean = {
   durationDays: number;
   listingLimit: number;
   featuredListings?: number | null;
+  featuredDays?: number | null;
+  leadLimit?: number | null;
   roles: string[];
   active: boolean;
   sortOrder?: number | null;
@@ -48,6 +56,8 @@ const toPlan = (p: PlanLean): PlanDto => ({
   durationDays: p.durationDays,
   listingLimit: p.listingLimit,
   featuredListings: p.featuredListings ?? 0,
+  featuredDays: p.featuredDays ?? 7,
+  leadLimit: p.leadLimit ?? 0,
   roles: p.roles as UserRole[],
   active: p.active,
   sortOrder: p.sortOrder ?? 0,
@@ -62,6 +72,23 @@ export async function listPlans(onlyActive = false, role?: UserRole) {
     .lean<PlanLean[]>();
   return rows.map(toPlan);
 }
+
+/** Creates the ₹599 Premium plan the first time the API starts with no plans at all. */
+export async function ensureDefaultPlan() {
+  if (await Plan.exists({})) return false;
+  await Plan.create({ ...DEFAULT_PLAN, roles: [...DEFAULT_PLAN.roles], active: true, sortOrder: 0 });
+  logger.info('Default Premium plan created');
+  return true;
+}
+
+const snapshotOf = (plan: PlanLean) => ({
+  name: plan.name,
+  durationDays: plan.durationDays,
+  listingLimit: plan.listingLimit,
+  featuredListings: plan.featuredListings ?? 0,
+  featuredDays: plan.featuredDays ?? 7,
+  leadLimit: plan.leadLimit ?? 0,
+});
 
 export async function createPlan(input: z.output<typeof planSchema>) {
   const p = await Plan.create(input);
@@ -85,6 +112,8 @@ type PaymentLean = {
     durationDays: number;
     listingLimit: number;
     featuredListings?: number | null;
+    featuredDays?: number | null;
+    leadLimit?: number | null;
   };
   amount: number;
   status: PaymentDto['status'];
@@ -108,6 +137,8 @@ const planRef = (p: PaymentLean) => ({
   durationDays: p.planSnapshot.durationDays,
   listingLimit: p.planSnapshot.listingLimit,
   featuredListings: p.planSnapshot.featuredListings ?? 0,
+  featuredDays: p.planSnapshot.featuredDays ?? 7,
+  leadLimit: p.planSnapshot.leadLimit ?? 0,
 });
 
 const toPayment = (p: PaymentLean): PaymentDto => ({
@@ -218,6 +249,9 @@ async function markPaid(
   if (extra.paymentId) payment.paymentId = extra.paymentId;
   if (extra.recordedBy) payment.recordedBy = extra.recordedBy;
   await payment.save();
+  await syncPremium(payment.user as Types.ObjectId);
+  await unlockLeads(payment.user as Types.ObjectId);
+  await releaseAwaitingListings(String(payment.user));
   const user = await User.findById(payment.user).select('name email').lean();
   void businessAlert('payment', {
     title: `Payment ₹${payment.amount.toLocaleString('en-IN')} from ${user?.name ?? 'a user'}`,
@@ -251,12 +285,7 @@ export async function recordManualPayment(input: z.output<typeof manualPaymentSc
   const p = await Payment.create({
     user: user._id,
     plan: plan._id,
-    planSnapshot: {
-      name: plan.name,
-      durationDays: plan.durationDays,
-      listingLimit: plan.listingLimit,
-      featuredListings: plan.featuredListings ?? 0,
-    },
+    planSnapshot: snapshotOf(plan),
     amount: input.amount,
     method: 'manual',
     reference: input.reference || null,
@@ -275,6 +304,7 @@ export async function refundPayment(id: string, by: string) {
   p.note = [p.note, `Refunded by ${by}`].filter(Boolean).join(' · ');
   if (p.endsAt && p.endsAt > new Date()) p.endsAt = new Date();
   await p.save();
+  await syncPremium(p.user as Types.ObjectId);
   return getPayment(p._id);
 }
 
@@ -296,6 +326,177 @@ export async function activeSubscription(userId: string): Promise<MySubscription
 export async function listingLimitFor(userId: string, role: UserRole) {
   const sub = await activeSubscription(userId);
   return Math.max(LISTING_LIMITS[role], sub?.plan.listingLimit ?? 0);
+}
+
+/** Keeps user.premiumUntil (the Premium badge) in step with their paid payments. */
+async function syncPremium(userId: Types.ObjectId) {
+  const last = await Payment.findOne({ user: userId, status: 'paid', endsAt: { $gt: new Date() } })
+    .sort({ endsAt: -1 })
+    .select('endsAt')
+    .lean();
+  await User.updateOne({ _id: userId }, { $set: { premiumUntil: last?.endsAt ?? null } });
+}
+
+/** A paid plan shows every lead that was held back. */
+async function unlockLeads(userId: Types.ObjectId) {
+  await Enquiry.updateMany(
+    { listingOwner: userId, lockedForOwner: true },
+    { $set: { lockedForOwner: false } },
+  );
+}
+
+const ACTIVE_LISTING = ['pending', 'published'];
+
+/** Listings saved while waiting for a plan go to review once the plan is on, up to the limit. */
+export async function releaseAwaitingListings(userId: string) {
+  const user = await User.findById(userId).select('role').lean();
+  if (!user) return 0;
+  const [limit, active, waiting] = await Promise.all([
+    listingLimitFor(userId, user.role as UserRole),
+    Property.countDocuments({ postedBy: userId, status: { $in: ACTIVE_LISTING } }),
+    Property.find({ postedBy: userId, awaitingPlan: true, status: 'draft' })
+      .sort({ updatedAt: 1 })
+      .select('_id title')
+      .lean(),
+  ]);
+  const room = Math.max(0, limit - active);
+  const go = waiting.slice(0, room);
+  if (!go.length) return 0;
+  await Property.updateMany(
+    { _id: { $in: go.map((p) => p._id) } },
+    { $set: { status: 'pending', awaitingPlan: false, submittedAt: new Date() } },
+  );
+  for (const p of go)
+    void businessAlert('listing', {
+      title: `Listing waiting for review: ${p.title}`,
+      link: '/admin/review',
+    });
+  return go.length;
+}
+
+const monthStart = (now = new Date()) => new Date(now.getFullYear(), now.getMonth(), 1);
+
+/** How many leads with contact details the owner may see in the current period, and since when. */
+async function leadAllowance(userId: string, role: UserRole) {
+  const sub = await activeSubscription(userId);
+  if (sub) {
+    return {
+      limit: sub.plan.leadLimit > 0 ? sub.plan.leadLimit : null,
+      since: new Date(sub.startsAt),
+      sub,
+    };
+  }
+  return { limit: FREE_LEADS_PER_MONTH[role], since: monthStart(), sub: null };
+}
+
+/** True when a new lead for this owner should hide its contact details. */
+export async function shouldLockLead(ownerId: Types.ObjectId | string) {
+  const owner = await User.findById(ownerId).select('role').lean();
+  if (!owner) return false;
+  const { limit, since } = await leadAllowance(String(ownerId), owner.role as UserRole);
+  if (limit === null) return false;
+  const seen = await Enquiry.countDocuments({
+    listingOwner: owner._id,
+    status: { $ne: 'spam' },
+    lockedForOwner: { $ne: true },
+    createdAt: { $gte: since },
+  });
+  return seen >= limit;
+}
+
+export async function usageFor(userId: string, role: UserRole): Promise<PlanUsage> {
+  const uid = new Types.ObjectId(userId);
+  const { limit: leadLimit, since, sub } = await leadAllowance(userId, role);
+  const [listings, listingLimit, leadsUsed, locked, featured, awaiting] = await Promise.all([
+    Property.countDocuments({ postedBy: uid, status: { $in: ACTIVE_LISTING } }),
+    listingLimitFor(userId, role),
+    Enquiry.countDocuments({
+      listingOwner: uid,
+      status: { $ne: 'spam' },
+      lockedForOwner: { $ne: true },
+      createdAt: { $gte: since },
+    }),
+    Enquiry.countDocuments({ listingOwner: uid, status: { $ne: 'spam' }, lockedForOwner: true }),
+    sub
+      ? Property.countDocuments({ postedBy: uid, selfFeaturedAt: { $gte: new Date(sub.startsAt) } })
+      : 0,
+    Property.countDocuments({ postedBy: uid, awaitingPlan: true, status: 'draft' }),
+  ]);
+  return {
+    listings: { used: listings, limit: listingLimit },
+    leads: { used: leadsUsed, limit: leadLimit, locked, periodStart: since.toISOString() },
+    featured: {
+      used: featured,
+      limit: sub?.plan.featuredListings ?? 0,
+      days: sub?.plan.featuredDays ?? 7,
+    },
+    awaitingPlan: awaiting,
+    premium: Boolean(sub),
+  };
+}
+
+/** Features one of the user's live listings using their plan's featured allowance. */
+export async function featureMine(userId: string, propertyId: string) {
+  const sub = await activeSubscription(userId);
+  if (!sub) throw new AppError(403, 'PLAN_REQUIRED', 'Take Premium to feature your listings.');
+  const p = await Property.findOne({ _id: propertyId, postedBy: userId });
+  if (!p) throw notFound('Listing not found');
+  if (p.status !== 'published') throw badRequest('Only live listings can be featured');
+  if (p.featured && p.featuredUntil && p.featuredUntil > new Date())
+    throw badRequest('This listing is already featured');
+  const used = await Property.countDocuments({
+    postedBy: userId,
+    selfFeaturedAt: { $gte: new Date(sub.startsAt) },
+  });
+  if (used >= sub.plan.featuredListings)
+    throw new AppError(
+      403,
+      'FEATURED_LIMIT',
+      `You have used all ${sub.plan.featuredListings} featured listings in this plan.`,
+    );
+  p.featured = true;
+  p.featuredUntil = new Date(Date.now() + sub.plan.featuredDays * DAY);
+  p.selfFeaturedAt = new Date();
+  await p.save();
+  return { featuredUntil: p.featuredUntil.toISOString() };
+}
+
+/** Emails and WhatsApps users whose plan ends within PLAN_REMINDER_DAYS and who have not renewed. */
+export async function sendPlanReminders(now = new Date()) {
+  const due = await Payment.find({
+    status: 'paid',
+    reminderSentAt: null,
+    endsAt: { $gt: now, $lte: new Date(now.getTime() + PLAN_REMINDER_DAYS * DAY) },
+  })
+    .select('user endsAt planSnapshot')
+    .limit(200);
+  let sent = 0;
+  for (const p of due) {
+    p.reminderSentAt = now;
+    await p.save();
+    // Already renewed: a later plan starts when this one ends.
+    const later = await Payment.exists({ user: p.user, status: 'paid', endsAt: { $gt: p.endsAt } });
+    if (later) continue;
+    const user = await User.findById(p.user).select('name email phone whatsappEnabled').lean();
+    if (!user) continue;
+    const ends = p.endsAt!.toLocaleDateString('en-IN', { dateStyle: 'long', timeZone: 'Asia/Kolkata' });
+    const url = `${env.PUBLIC_SITE_URL}/dashboard/plans`;
+    void sendMail(
+      user.email,
+      `Your ${p.planSnapshot?.name ?? 'Premium'} plan ends on ${ends}`,
+      [
+        `Hi ${user.name},`,
+        `Your ${p.planSnapshot?.name ?? 'Premium'} plan on NEXUS Estate ends on ${ends}.`,
+        'Renew now to keep getting every lead and to add new listings.',
+      ],
+      { label: 'Renew plan', url },
+    );
+    if (user.whatsappEnabled !== false && user.phone)
+      void sendWhatsApp(user.phone, `Your NEXUS Estate plan ends on ${ends}. Renew: ${url}`);
+    sent++;
+  }
+  if (sent) logger.info({ sent }, 'plan reminders sent');
+  return sent;
 }
 
 export async function myPayments(userId: string) {
@@ -340,12 +541,7 @@ export async function createCheckout(userId: string, planId: string): Promise<Ch
   await Payment.create({
     user: user._id,
     plan: plan._id,
-    planSnapshot: {
-      name: plan.name,
-      durationDays: plan.durationDays,
-      listingLimit: plan.listingLimit,
-      featuredListings: plan.featuredListings ?? 0,
-    },
+    planSnapshot: snapshotOf(plan),
     amount: plan.price,
     method: 'online',
     orderId: order.id,

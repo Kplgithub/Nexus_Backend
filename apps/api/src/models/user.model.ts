@@ -46,6 +46,8 @@ const userSchema = new Schema(
     verifiedAt: { type: Date, default: null },
     verifiedBy: { type: String, maxlength: 80, default: null },
     verificationNote: { type: String, maxlength: 1000, default: null },
+    /** End of the user's paid plan (the latest one). Shows the Premium badge until then. */
+    premiumUntil: { type: Date, default: null },
 
     status: { type: String, enum: USER_STATUSES, default: 'active' },
     saved: { type: [Schema.Types.ObjectId], ref: 'Property', default: [] },

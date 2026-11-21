@@ -42,6 +42,9 @@ const planSchema = new Schema(
     durationDays: { type: Number, required: true, min: 1 },
     listingLimit: { type: Number, required: true, min: 1 },
     featuredListings: { type: Number, default: 0 },
+    featuredDays: { type: Number, default: 7 },
+    /** Leads with contact details per plan period; 0 means no limit. */
+    leadLimit: { type: Number, default: 0 },
     roles: { type: [String], enum: USER_ROLES, default: [] },
     active: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
@@ -61,6 +64,8 @@ const paymentSchema = new Schema(
       durationDays: Number,
       listingLimit: Number,
       featuredListings: Number,
+      featuredDays: Number,
+      leadLimit: Number,
     },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR' },
@@ -74,6 +79,8 @@ const paymentSchema = new Schema(
     paidAt: { type: Date, default: null },
     startsAt: { type: Date, default: null },
     endsAt: { type: Date, default: null },
+    /** Set once the "your plan ends soon" reminder went out. */
+    reminderSentAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
