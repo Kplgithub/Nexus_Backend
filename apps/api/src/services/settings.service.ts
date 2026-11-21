@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     showFeatured: true,
   },
   allowInternationalEnquiries: false,
+  featurePrices: { days7: 49, days30: 99 },
   enquiryNotificationEmail: undefined,
 };
 
@@ -32,6 +33,7 @@ export async function getSettings(): Promise<SiteSettings> {
   const doc = await SiteSettingsModel.findOne({ key: 'site' }).lean();
   const merged = { ...DEFAULT_SETTINGS, ...((doc?.data as Partial<SiteSettings>) ?? {}) };
   merged.home = { ...DEFAULT_SETTINGS.home, ...(merged.home ?? {}) };
+  merged.featurePrices = { ...DEFAULT_SETTINGS.featurePrices, ...(merged.featurePrices ?? {}) };
   cache = { value: merged, at: Date.now() };
   return merged;
 }
@@ -55,14 +57,28 @@ export async function getPublicSettings(): Promise<Omit<SiteSettings, 'enquiryNo
       };
 }
 
+/** The database stores empty optional fields as null; the schema expects them missing. */
+function dropNulls<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(dropNulls) as T;
+  if (v && typeof v === 'object' && !(v instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>)
+        .filter(([, x]) => x !== null)
+        .map(([k, x]) => [k, dropNulls(x)]),
+    ) as T;
+  }
+  return v;
+}
+
 export async function updateSettings(patch: Partial<SiteSettings>): Promise<SiteSettings> {
-  const current = await getSettings();
+  const current = dropNulls(await getSettings());
   const next = siteSettingsSchema.parse({
     ...current,
     ...patch,
     home: { ...current.home, ...(patch.home ?? {}) },
     address: { ...current.address, ...(patch.address ?? {}) },
     social: patch.social ?? current.social,
+    featurePrices: { ...current.featurePrices, ...(patch.featurePrices ?? {}) },
   });
   await SiteSettingsModel.updateOne({ key: 'site' }, { $set: { data: next } }, { upsert: true });
   cache = null;
