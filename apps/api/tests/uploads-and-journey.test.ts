@@ -126,6 +126,26 @@ describe('end-to-end journey (API level)', () => {
       expect(detail.status).toBe(200);
       expect(detail.body.data.property.images[0].alt).toBe('Front view');
 
+      // 6b. A cover that is not the first photo (older records) still leads
+      // the gallery, and the card uses the same photo.
+      expect(
+        (
+          await s.patch(`/api/v1/admin/properties/${id}`, {
+            images: [
+              { ...image, alt: 'Front view' },
+              { ...image, alt: 'Balcony' },
+            ],
+            coverImageIndex: 1,
+          })
+        ).status,
+      ).toBe(200);
+      const withCover = await request(app).get(`/api/v1/properties/${slug}`);
+      expect(withCover.body.data.property.images.map((i: { alt: string }) => i.alt)).toEqual([
+        'Balcony',
+        'Front view',
+      ]);
+      expect(withCover.body.data.property.coverImage.alt).toBe('Balcony');
+
       // 7–8. Visitor enquiry is saved.
       const enq = await request(app).post('/api/v1/enquiries').send({
         name: 'Visitor',

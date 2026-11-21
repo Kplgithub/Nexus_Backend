@@ -91,3 +91,14 @@ export function median(values: number[]): number | null {
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2);
 }
+
+/**
+ * The cover photo is always the first photo. Older records may still point at
+ * another index, so this moves that photo to the front (other photos keep
+ * their order). Out-of-range indexes leave the list as it is.
+ */
+export function coverFirst<T>(images: readonly T[], coverIndex?: number | null): T[] {
+  const i = coverIndex ?? 0;
+  if (i <= 0 || i >= images.length) return [...images];
+  return [images[i]!, ...images.slice(0, i), ...images.slice(i + 1)];
+}
