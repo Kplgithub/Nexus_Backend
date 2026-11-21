@@ -829,3 +829,12 @@ export type AlertSettings = {
 };
 
 export type AlertChannels = { email: boolean; whatsapp: boolean };
+
+export type AdminBadges = {
+  review: number;
+  projects: number;
+  leads: number;
+  reports: number;
+  verification: number;
+  unread: number;
+};

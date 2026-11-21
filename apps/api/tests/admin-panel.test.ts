@@ -265,6 +265,9 @@ describe('verification and featured listings', () => {
     const q = await boss.get('/api/v1/admin/verification?status=pending');
     expect(q.body.data.map((u: { id: string }) => u.id)).toEqual([agent.user.id]);
     expect(q.body.counts.waiting).toBe(1);
+    const badges = (await boss.get('/api/v1/admin/badges')).body.data;
+    expect(badges.verification).toBe(1);
+    expect(badges.unread).toBeGreaterThanOrEqual(1);
 
     const noReason = await boss.post(`/api/v1/admin/users/${agent.user.id}/verification`, {
       decision: 'rejected',

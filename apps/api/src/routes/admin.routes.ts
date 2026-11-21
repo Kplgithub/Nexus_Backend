@@ -47,7 +47,7 @@ import {
   verificationDecisionSchema,
   verificationQuerySchema,
 } from '@nexus/shared';
-import { getCharts } from '../services/charts.service.js';
+import { getBadges, getCharts } from '../services/charts.service.js';
 import * as team from '../services/team.service.js';
 import * as visits from '../services/site-visit.service.js';
 import * as billing from '../services/billing.service.js';
@@ -134,6 +134,9 @@ adminRouter.get('/dashboard/charts', async (req, res) => {
   const { days } = parseQuery(dashboardChartsQuerySchema, req);
   ok(res, await getCharts(days, isSuperAdmin(req.admin!.role)));
 });
+
+// Small counts for the sidebar badges; cheap enough to poll.
+adminRouter.get('/badges', async (req, res) => ok(res, await getBadges(req.admin!.id)));
 
 /* ---------------- Notifications (bell) ---------------- */
 
