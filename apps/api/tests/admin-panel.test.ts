@@ -477,6 +477,26 @@ describe('plans and payments', () => {
     expect(dash.usage.premium).toBe(false);
   });
 
+  it('counts daily listing views for the poster dashboard chart', async () => {
+    const agent = await signUpUser(app, 'agent');
+    const { id } = (await agent.post('/api/v1/me/properties', userListing({ status: 'pending' })))
+      .body.data;
+    await boss.post(`/api/v1/admin/properties/${id}/status`, { status: 'published' });
+    for (let i = 0; i < 2; i++) {
+      expect((await request(app).post(`/api/v1/properties/${id}/view`)).status).toBe(200);
+    }
+    const perf = (await agent.get('/api/v1/me/dashboard')).body.data.performance;
+    expect(perf.days).toHaveLength(14);
+    expect(perf.views).toHaveLength(14);
+    expect(perf.views[13]).toBe(2);
+    expect(perf.views30).toBe(2);
+    expect(perf.viewsPrev30).toBe(0);
+    expect(perf.leads30).toBe(0);
+    // Another poster sees none of these views.
+    const other = await signUpUser(app, 'agent');
+    expect((await other.get('/api/v1/me/dashboard')).body.data.performance.views30).toBe(0);
+  });
+
   it('lists only matching active plans to users and refuses checkout when online payment is off', async () => {
     await boss.post('/api/v1/admin/plans', {
       name: 'Agent Pro',
