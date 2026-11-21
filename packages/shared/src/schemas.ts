@@ -850,6 +850,12 @@ export const siteSettingsSchema = z.object({
     banners: z.array(homeBannerSchema).max(12).default([]),
   }),
   allowInternationalEnquiries: z.boolean().default(false),
+  featurePrices: z
+    .object({
+      days7: z.coerce.number().int().min(1).max(100000),
+      days30: z.coerce.number().int().min(1).max(100000),
+    })
+    .default({ days7: 49, days30: 99 }),
   enquiryNotificationEmail: z
     .string()
     .trim()

@@ -30,6 +30,7 @@ import { Property } from '../models/property.model.js';
 import { Enquiry } from '../models/misc.models.js';
 import { businessAlert, sendWhatsApp } from './notification.service.js';
 import { sendMail } from './mail.service.js';
+import { getSettings } from './settings.service.js';
 
 const DAY = 86_400_000;
 
@@ -584,8 +585,17 @@ export async function myPayments(userId: string) {
 
 /* ---------------- Paid Featured (₹49 / ₹99) ---------------- */
 
-const addonFor = (days: number) => {
-  const a = FEATURE_ADDONS.find((x) => x.days === days);
+/** The Featured options with the prices admin has set in Settings. */
+export async function featureAddons() {
+  const { featurePrices } = await getSettings();
+  return FEATURE_ADDONS.map((a) => ({
+    ...a,
+    price: a.days === 7 ? featurePrices.days7 : featurePrices.days30,
+  }));
+}
+
+const addonFor = async (days: number) => {
+  const a = (await featureAddons()).find((x) => x.days === days);
   if (!a) throw badRequest('Choose 7 days or 1 month');
   return a;
 };
@@ -657,7 +667,7 @@ export async function createFeatureCheckout(
 ): Promise<CheckoutOrder> {
   if (!razorpayEnabled)
     throw new AppError(503, 'PAYMENTS_OFF', 'Online payment is not available yet. Please call us.');
-  const addon = addonFor(days);
+  const addon = await addonFor(days);
   const [user, prop] = await Promise.all([
     User.findById(userId).select('name email phone').lean(),
     liveOwnListing(userId, propertyId),
@@ -690,7 +700,7 @@ export async function recordManualFeature(
   input: { propertyId: string; days: FeatureAddonDays; amount?: number; reference?: string },
   by: string,
 ) {
-  const addon = addonFor(input.days);
+  const addon = await addonFor(input.days);
   const prop = await Property.findById(input.propertyId).select('postedBy status').lean();
   if (!prop?.postedBy) throw notFound('Listing not found');
   if (prop.status !== 'published') throw badRequest('Only live listings can be featured');

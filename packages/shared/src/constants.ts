@@ -445,7 +445,10 @@ export const DEFAULT_PLAN = {
   roles: [...LISTING_ROLES] as UserRole[],
 } as const;
 
-/** Paid Featured for one live listing, on top of any plan. Rupees, GST included. */
+/**
+ * Paid Featured for one live listing, on top of any plan. Rupees, GST included.
+ * These are the starting prices: admin can change them in Settings (featurePrices).
+ */
 export const FEATURE_ADDONS = [
   { days: 7, price: 49, label: '7 days' },
   { days: 30, price: 99, label: '1 month' },
