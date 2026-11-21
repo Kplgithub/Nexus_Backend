@@ -16,6 +16,9 @@ import {
   PROJECT_STATUSES,
   paymentVerifySchema,
   featureAddonSchema,
+  supportReplySchema,
+  supportTicketCreateSchema,
+  SUPPORT_MAX_IMAGES,
   type PropertyCard,
 } from '@nexus/shared';
 import * as billing from '../services/billing.service.js';
@@ -39,6 +42,7 @@ import * as leads from '../services/enquiry.service.js';
 import * as projects from '../services/project.service.js';
 import { getUserDashboard } from '../services/dashboard.service.js';
 import { storeImage } from '../services/upload.service.js';
+import * as tickets from '../services/ticket.service.js';
 
 /** Everything a signed-in website user can do with their own account. */
 export const meRouter: RouterType = Router();
@@ -301,4 +305,46 @@ meRouter.post('/properties/:id/feature-checkout', limiters.userWrite, async (req
 
 meRouter.post('/payments/verify', limiters.userWrite, async (req, res) =>
   ok(res, await billing.confirmCheckout(req.user!.id, parseBody(paymentVerifySchema, req))),
+);
+
+/* ---------------- Help & support (every signed-in user) ---------------- */
+
+meRouter.get('/support', async (req, res) => {
+  ok(res, await tickets.listMine(req.user!.id));
+});
+
+meRouter.get('/support/unread', async (req, res) => {
+  ok(res, { unread: await tickets.unreadForUser(req.user!.id) });
+});
+
+meRouter.post('/support', limiters.userWrite, async (req, res) => {
+  created(res, await tickets.createTicket(req.user!.id, parseBody(supportTicketCreateSchema, req)));
+});
+
+meRouter.get('/support/:id', async (req, res) => {
+  ok(res, await tickets.getMine(req.user!.id, parseId(req)));
+});
+
+meRouter.post('/support/:id/reply', limiters.userWrite, async (req, res) => {
+  const id = parseId(req);
+  ok(res, await tickets.replyMine(req.user!.id, id, parseBody(supportReplySchema, req)));
+});
+
+const supportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: IMAGE_MAX_BYTES, files: SUPPORT_MAX_IMAGES, fields: 2 },
+});
+
+/** Screenshots for a support request; open to buyers and tenants too. */
+meRouter.post(
+  '/support-uploads',
+  limiters.upload,
+  supportUpload.array('files', SUPPORT_MAX_IMAGES),
+  async (req, res) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (!files.length) throw badRequest('Choose an image');
+    const urls: string[] = [];
+    for (const f of files) urls.push((await storeImage(f.buffer)).url);
+    ok(res, { urls });
+  },
 );

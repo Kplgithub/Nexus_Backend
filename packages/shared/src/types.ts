@@ -35,6 +35,8 @@ import type {
   PropertyType,
   SortOption,
   TransactionType,
+  SupportStatus,
+  SupportTopic,
   UserRole,
   UserStatus,
 } from './constants.js';
@@ -884,5 +886,47 @@ export type AdminBadges = {
   leads: number;
   reports: number;
   verification: number;
+  support: number;
   unread: number;
+};
+
+export type SupportMessage = {
+  from: 'user' | 'admin';
+  /** Team member's name on admin replies; the user's name otherwise. */
+  by: string;
+  text: string;
+  images: string[];
+  at: string;
+};
+
+export type SupportTicketSummary = {
+  id: string;
+  ticketId: string;
+  topic: SupportTopic | null;
+  subject: string;
+  status: SupportStatus;
+  property: { id: string; title: string; slug: string } | null;
+  lastMessageAt: string;
+  createdAt: string;
+  /** For the user: a team reply they have not opened. For admins: a user message not opened. */
+  unread: boolean;
+  user: { id: string; name: string; role: UserRole; companyName: string | null; phone: string };
+};
+
+export type SupportTicket = SupportTicketSummary & {
+  messages: SupportMessage[];
+  resolvedAt: string | null;
+};
+
+/** Admin-only extra details about who raised the ticket. */
+export type AdminSupportTicket = SupportTicket & {
+  userInfo: { email: string; premiumUntil: string | null; verified: boolean } | null;
+};
+
+export type AdminSupportCounts = {
+  /** Tickets per role for the chosen status ("all" = every role). */
+  roles: Record<UserRole | 'all', number>;
+  /** Tickets per status for the chosen role ("all" = every status). */
+  statuses: Record<SupportStatus | 'all', number>;
+  stats: { open: number; inProgress: number; resolved7d: number; avgFirstReplyMins: number | null };
 };
