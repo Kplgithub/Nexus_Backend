@@ -11,6 +11,7 @@ import { AppError, badRequest } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { safeEqual } from '../lib/crypto.js';
 import { Otp } from '../models/user.model.js';
+import { isTestOtpActive, TEST_OTP_CODE } from '../lib/test-otp.js';
 
 const hashCode = (phone: string, purpose: string, code: string) =>
   createHmac('sha256', env.JWT_SECRET).update(`otp:${phone}:${purpose}:${code}`).digest('hex');
@@ -64,7 +65,11 @@ export async function sendOtp(phone: string, purpose: OtpPurpose, ipHash?: strin
     throw new AppError(429, 'OTP_LIMIT', 'Too many codes requested. Try again in an hour.');
   }
 
-  const code = String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, '0');
+  // Launch testing: fixed code and no SMS until it expires (see lib/test-otp.ts).
+  const testPhone = isTestOtpActive();
+  const code = testPhone
+    ? TEST_OTP_CODE
+    : String(randomInt(0, 10 ** OTP_LENGTH)).padStart(OTP_LENGTH, '0');
   await Otp.create({
     phone,
     purpose,
@@ -72,6 +77,10 @@ export async function sendOtp(phone: string, purpose: OtpPurpose, ipHash?: strin
     expiresAt: new Date(Date.now() + OTP_TTL_SECONDS * 1000),
     ipHash,
   });
+  if (testPhone) {
+    logger.warn({ phone }, 'Launch-test OTP active: fixed code, no SMS sent');
+    return { expiresIn: OTP_TTL_SECONDS, resendIn: OTP_RESEND_SECONDS, devCode: undefined };
+  }
   const devCode = await deliver(phone, code);
   return { expiresIn: OTP_TTL_SECONDS, resendIn: OTP_RESEND_SECONDS, devCode };
 }
