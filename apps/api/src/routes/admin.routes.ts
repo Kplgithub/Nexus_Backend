@@ -30,6 +30,7 @@ import {
   alertSettingsUpdateSchema,
   dashboardChartsQuerySchema,
   featureListingSchema,
+  manualFeatureSchema,
   isSuperAdmin,
   leadAssignSchema,
   manualPaymentSchema,
@@ -535,6 +536,12 @@ adminRouter.post('/payments/manual', requireRole('admin'), async (req, res) => {
     p.id,
     `₹${p.amount} ${p.plan.name} — ${p.user?.name ?? ''}`,
   );
+  created(res, p);
+});
+
+adminRouter.post('/payments/manual-feature', requireRole('admin'), async (req, res) => {
+  const p = await billing.recordManualFeature(parseBody(manualFeatureSchema, req), req.admin!.name);
+  await audit(req.admin, 'record', 'payment', p.id, `₹${p.amount} ${p.plan.name}`);
   created(res, p);
 });
 

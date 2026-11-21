@@ -619,6 +619,22 @@ const otpCode = z
   .regex(new RegExp(`^\\d{${OTP_LENGTH}}$`), `Enter the ${OTP_LENGTH}-digit code`);
 
 export const otpLoginSchema = z.object({ phone: phoneInput, code: otpCode });
+
+/** Who a visitor says they are when they ask to see a poster's number. */
+export const CONTACT_INTENTS = ['tenant', 'buyer', 'broker', 'owner'] as const;
+export type ContactIntent = (typeof CONTACT_INTENTS)[number];
+
+/** Quick sign-up from the "view number" popup: details, then an OTP, no password. */
+export const quickStartSchema = z.object({
+  intent: z.enum(CONTACT_INTENTS),
+  name: plainText(2, 80),
+  email,
+  phone: phoneInput,
+  acceptTerms: z.literal(true, { error: 'Please accept the terms to continue' }),
+  website: honeypot,
+});
+export type QuickStartInput = z.input<typeof quickStartSchema>;
+export const quickVerifySchema = quickStartSchema.extend({ code: otpCode });
 export const otpVerifySchema = z.object({ code: otpCode });
 
 export const forgotPasswordSchema = z.object({
@@ -1182,12 +1198,28 @@ export const planSchema = z.object({
   durationDays: z.number().int().min(1).max(730),
   listingLimit: z.number().int().min(1).max(10_000),
   featuredListings: z.number().int().min(0).max(1000).default(0),
+  /** How long each featured listing stays featured. */
+  featuredDays: z.number().int().min(1).max(90).default(7),
+  /** Leads with contact details per plan period. 0 means no limit. */
+  leadLimit: z.number().int().min(0).max(100_000).default(0),
   roles: z.array(z.enum(USER_ROLES)).min(1),
   active: z.boolean().default(true),
   sortOrder: z.number().int().min(0).max(1000).default(0),
 });
 export type PlanInput = z.input<typeof planSchema>;
 export const planUpdateSchema = planSchema.partial().strict();
+
+/** Pay to feature one live listing: 7 days (₹49) or 30 days (₹99). */
+export const featureAddonSchema = z.object({
+  days: z.union([z.literal(7), z.literal(30)]),
+});
+
+export const manualFeatureSchema = z.object({
+  propertyId: objectIdSchema,
+  days: z.union([z.literal(7), z.literal(30)]),
+  amount: z.number().int().min(0).max(100_000).optional(),
+  reference: plainText(0, 120).default(''),
+});
 
 export const manualPaymentSchema = z.object({
   userId: objectIdSchema,

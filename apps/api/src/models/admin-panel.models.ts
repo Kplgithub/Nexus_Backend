@@ -1,5 +1,11 @@
 import { Schema, model } from 'mongoose';
-import { PAYMENT_METHODS, PAYMENT_STATUSES, SITE_VISIT_STATUSES, USER_ROLES } from '@nexus/shared';
+import {
+  PAYMENT_KINDS,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  SITE_VISIT_STATUSES,
+  USER_ROLES,
+} from '@nexus/shared';
 
 const noteSchema = new Schema(
   {
@@ -42,6 +48,9 @@ const planSchema = new Schema(
     durationDays: { type: Number, required: true, min: 1 },
     listingLimit: { type: Number, required: true, min: 1 },
     featuredListings: { type: Number, default: 0 },
+    featuredDays: { type: Number, default: 7 },
+    /** Leads with contact details per plan period; 0 means no limit. */
+    leadLimit: { type: Number, default: 0 },
     roles: { type: [String], enum: USER_ROLES, default: [] },
     active: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
@@ -55,12 +64,20 @@ export const Plan = model('Plan', planSchema);
 const paymentSchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    plan: { type: Schema.Types.ObjectId, ref: 'Plan', required: true },
+    /** "plan" buys a subscription; "featured" features one listing for featureDays. */
+    kind: { type: String, enum: PAYMENT_KINDS, default: 'plan' },
+    plan: { type: Schema.Types.ObjectId, ref: 'Plan', default: null },
+    property: { type: Schema.Types.ObjectId, ref: 'Property', default: null },
+    featureDays: { type: Number, default: null },
+    /** Listings posted in this plan period (deleting one does not give the slot back). */
+    postsUsed: { type: Number, default: 0 },
     planSnapshot: {
       name: String,
       durationDays: Number,
       listingLimit: Number,
       featuredListings: Number,
+      featuredDays: Number,
+      leadLimit: Number,
     },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR' },
@@ -74,12 +91,18 @@ const paymentSchema = new Schema(
     paidAt: { type: Date, default: null },
     startsAt: { type: Date, default: null },
     endsAt: { type: Date, default: null },
+    /** Set once the "your plan ends soon" reminder went out. */
+    reminderSentAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
 paymentSchema.index({ user: 1, status: 1, endsAt: -1 });
 paymentSchema.index({ status: 1, createdAt: -1 });
-paymentSchema.index({ orderId: 1 }, { unique: true, sparse: true });
+// Manual payments have no order id (null), so only real ids must be unique.
+paymentSchema.index(
+  { orderId: 1 },
+  { unique: true, partialFilterExpression: { orderId: { $type: 'string' } } },
+);
 export const Payment = model('Payment', paymentSchema);
 
 /* ---------------- Admin notifications (the bell) ---------------- */

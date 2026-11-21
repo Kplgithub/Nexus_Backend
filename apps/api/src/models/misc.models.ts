@@ -79,6 +79,8 @@ const enquirySchema = new Schema(
     /** The user who posted the listing, if any — they see this lead in their dashboard. */
     listingOwner: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     seenByOwner: { type: Boolean, default: false },
+    /** Over the owner's free lead limit: contact details stay hidden until they take a plan. */
+    lockedForOwner: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

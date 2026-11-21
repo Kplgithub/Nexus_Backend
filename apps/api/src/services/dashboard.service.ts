@@ -10,7 +10,7 @@ import { Property } from '../models/property.model.js';
 import { Enquiry } from '../models/misc.models.js';
 import { User } from '../models/user.model.js';
 import { listLeadsForOwner } from './enquiry.service.js';
-import { activeSubscription, listingLimitFor } from './billing.service.js';
+import { activeSubscription, listingLimitFor, usageFor } from './billing.service.js';
 
 export async function getDashboard(): Promise<DashboardStats> {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -129,5 +129,6 @@ export async function getUserDashboard(userId: string, role: UserRole): Promise<
     listingLimit: await listingLimitFor(userId, role),
     recentLeads: recent.items,
     subscription: await activeSubscription(userId),
+    usage: await usageFor(userId, role),
   };
 }

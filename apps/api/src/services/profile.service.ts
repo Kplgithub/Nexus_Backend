@@ -17,6 +17,7 @@ type ProfileUser = {
   about?: string | null;
   reraNumber?: string | null;
   verified?: boolean;
+  premiumUntil?: Date | null;
   experienceYears?: number | null;
   website?: string | null;
   logoUrl?: string | null;
@@ -29,7 +30,7 @@ type ProfileUser = {
 
 const LIVE = { status: 'published', listingVisibility: 'public' } as const;
 const FIELDS =
-  'role name companyName about reraNumber verified experienceYears website logoUrl citySlug localities profileSlug showPhone createdAt';
+  'role name companyName about reraNumber verified premiumUntil experienceYears website logoUrl citySlug localities profileSlug showPhone createdAt';
 
 /** Public page for an agent or builder. Blocked accounts and owners have no public profile. */
 export async function getProfile(role: Role, slug: string): Promise<PublicProfile> {
@@ -56,6 +57,7 @@ export async function getProfile(role: Role, slug: string): Promise<PublicProfil
     about: u.about ?? null,
     reraNumber: u.reraNumber ?? null,
     verified: Boolean(u.verified),
+    premium: Boolean(u.premiumUntil && new Date(u.premiumUntil) > new Date()),
     experienceYears: u.experienceYears ?? null,
     website: u.website ?? null,
     logoUrl: u.logoUrl ?? null,

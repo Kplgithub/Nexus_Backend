@@ -15,7 +15,7 @@ import { Admin, Enquiry } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
 import { Project } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
-import { otpEnabled, env } from '../config/env.js';
+import { otpEnabled, env, mailEnabled, whatsappEnabled } from '../config/env.js';
 import { AppError, badRequest, forbidden, notFound } from '../lib/errors.js';
 import type { AuthedUser } from '../middleware/user-auth.js';
 import { escapeRegex, paginate } from '../lib/respond.js';
@@ -23,7 +23,14 @@ import { toCsv } from '../lib/csv.js';
 import { nextLeadId } from './support.service.js';
 import { getSettings } from './settings.service.js';
 import { notifyNewLead, sendMail } from './mail.service.js';
-import { businessAlert, getAlertSettings, notifyAdmins } from './notification.service.js';
+import {
+  businessAlert,
+  getAlertSettings,
+  notifyAdmins,
+  sendFlowSms,
+  sendWhatsApp,
+} from './notification.service.js';
+import { shouldLockLead } from './billing.service.js';
 
 const CONSENT_TEXT =
   'I agree to be contacted by NEXUS Estate by phone, WhatsApp or email about this enquiry.';
@@ -59,6 +66,7 @@ type EnquiryLean = {
   user?: Types.ObjectId | null;
   listingOwner?: Types.ObjectId | { _id: Types.ObjectId; name: string } | null;
   seenByOwner?: boolean;
+  lockedForOwner?: boolean;
 };
 
 function adminRefOf(a: EnquiryLean['assignedAdmin']): EnquiryDto['assignedAdmin'] {
@@ -192,6 +200,7 @@ export async function createEnquiry(
   if (recent) return { leadId: recent.leadId, duplicate: true };
 
   const spam = looksAutomated(input);
+  const locked = !spam && owner ? await shouldLockLead(owner) : false;
   const leadId = await nextLeadId('E');
   await Enquiry.create({
     leadId,
@@ -214,10 +223,11 @@ export async function createEnquiry(
     userAgent: meta.userAgent?.slice(0, 300),
     user: user?.id ?? null,
     listingOwner: owner,
+    lockedForOwner: locked,
   });
 
   if (!spam && property?.postedBy) {
-    void notifyListingOwner(property, input.name, phone, input.message);
+    void notifyListingOwner(property, input.name, phone, input.message, locked);
   }
   if (!spam && project) {
     void notifyListingOwner(
@@ -225,6 +235,7 @@ export async function createEnquiry(
       input.name,
       phone,
       input.message,
+      locked,
     );
   }
   const about = property?.title ?? project?.name;
@@ -267,9 +278,26 @@ async function notifyListingOwner(
   name: string,
   phone: string,
   message: string,
+  locked: boolean,
 ) {
-  const owner = await User.findById(property.postedBy).select('email name').lean();
+  const owner = await User.findById(property.postedBy)
+    .select('email name phone whatsappEnabled premiumUntil')
+    .lean();
   if (!owner) return;
+  const url = `${env.PUBLIC_SITE_URL}/dashboard/leads`;
+  if (locked) {
+    await sendMail(
+      owner.email,
+      `New lead for ${property.title}`,
+      [
+        `Hi ${owner.name},`,
+        `Someone is interested in “${property.title}”.`,
+        'You have used your free leads for this month. Take Premium to see their name and number.',
+      ],
+      { label: 'See this lead', url: `${env.PUBLIC_SITE_URL}/dashboard/plans` },
+    );
+    return;
+  }
   await sendMail(
     owner.email,
     `New enquiry for ${property.title}`,
@@ -278,8 +306,12 @@ async function notifyListingOwner(
       `${name} (${phone}) is interested in “${property.title}”.`,
       ...(message ? [`Message: ${message}`] : []),
     ],
-    { label: 'See all your leads', url: `${env.PUBLIC_SITE_URL}/dashboard/leads` },
+    { label: 'See all your leads', url },
   );
+  // Premium members also get the lead on WhatsApp straight away.
+  const premium = owner.premiumUntil && new Date(owner.premiumUntil) > new Date();
+  if (premium && owner.whatsappEnabled !== false && owner.phone)
+    void sendWhatsApp(owner.phone, `New lead: ${name} (${phone}) for ${property.title}. ${url}`);
 }
 
 export async function listEnquiries(q: z.output<typeof adminEnquiryQuerySchema>, adminId?: string) {
@@ -456,19 +488,38 @@ export async function listLeadsForOwner(userId: string, page = 1, limit = 20, un
       .lean<EnquiryLean[]>(),
     Enquiry.countDocuments(f),
   ]);
-  const items: ReceivedLead[] = rows.map((e) => ({
-    id: String(e._id),
-    leadId: e.leadId,
-    type: e.type,
-    name: e.name,
-    phone: e.phone,
-    email: e.email ?? null,
-    message: e.message,
-    property: propertyRef(e),
-    project: projectRef(e),
-    createdAt: e.createdAt.toISOString(),
-    seen: Boolean(e.seenByOwner),
-  }));
+  const items: ReceivedLead[] = rows.map((e) =>
+    e.lockedForOwner
+      ? {
+          id: String(e._id),
+          leadId: e.leadId,
+          type: e.type,
+          // Hidden until the owner takes a plan. Nothing that identifies the person leaves the API.
+          name: 'Hidden lead',
+          phone: '',
+          email: null,
+          message: '',
+          property: propertyRef(e),
+          project: projectRef(e),
+          createdAt: e.createdAt.toISOString(),
+          seen: Boolean(e.seenByOwner),
+          locked: true,
+        }
+      : {
+          id: String(e._id),
+          leadId: e.leadId,
+          type: e.type,
+          name: e.name,
+          phone: e.phone,
+          email: e.email ?? null,
+          message: e.message,
+          property: propertyRef(e),
+          project: projectRef(e),
+          createdAt: e.createdAt.toISOString(),
+          seen: Boolean(e.seenByOwner),
+          locked: false,
+        },
+  );
   return { items, meta: paginate(page, limit, total) };
 }
 
@@ -543,6 +594,7 @@ export async function revealContact(propertyId: string, viewer: AuthedUser, meta
   })
     .select('_id')
     .lean();
+  const locked = already ? false : await shouldLockLead(property.postedBy);
   if (!already) {
     const today = await Enquiry.countDocuments({
       user: viewer.id,
@@ -573,12 +625,60 @@ export async function revealContact(propertyId: string, viewer: AuthedUser, meta
       userAgent: meta.userAgent?.slice(0, 300),
       user: viewer.id,
       listingOwner: property.postedBy,
+      lockedForOwner: locked,
     });
   }
-  return {
+  const contact = {
     name: poster.role === 'individual' ? poster.name : poster.companyName || poster.name,
     contactPerson: poster.name,
     phone: poster.phone,
     whatsapp: poster.whatsappEnabled ? poster.phone : null,
   };
+  if (!already) {
+    void notifyListingOwner(
+      property,
+      viewer.name,
+      viewer.phone,
+      'Viewed your contact details.',
+      locked,
+    );
+    void sendContactToViewer(viewer, property, contact);
+  }
+  return {
+    ...contact,
+    // Where a copy of the number went (only on the first view).
+    sent: {
+      email: !already && mailEnabled,
+      mobile:
+        !already &&
+        ((env.SMS_DRIVER === 'msg91' && Boolean(env.MSG91_CONTACT_FLOW_ID)) || whatsappEnabled),
+    },
+  };
+}
+
+/** Sends the poster's number to the visitor by email and SMS (and WhatsApp when set up). */
+async function sendContactToViewer(
+  viewer: AuthedUser,
+  property: EnquiryProperty,
+  c: { name: string; contactPerson: string; phone: string },
+) {
+  const url = `${env.PUBLIC_SITE_URL}/properties/${property.slug}`;
+  await sendMail(
+    viewer.email,
+    `Contact for ${property.title}`,
+    [
+      `Hi ${viewer.name},`,
+      `Here is the contact you asked for on NEXUS Estate.`,
+      `${c.name}${c.contactPerson !== c.name ? ` (${c.contactPerson})` : ''}: ${c.phone}`,
+      `Property: ${property.title}`,
+    ],
+    { label: 'Open the property', url },
+  );
+  const text = `NEXUS Estate: ${c.name} ${c.phone} for ${property.title}`;
+  const sms = await sendFlowSms(viewer.phone, {
+    name: c.name.slice(0, 30),
+    phone: c.phone,
+    title: property.title.slice(0, 30),
+  });
+  if (!sms) void sendWhatsApp(viewer.phone, `${text}. ${url}`);
 }

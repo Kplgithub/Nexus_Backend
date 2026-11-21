@@ -400,8 +400,44 @@ export const POSTER_LABELS: Record<PosterType, string> = {
   builder: 'Builder',
 };
 
-/** Active (live or under review) listings a user may hold at once. */
-export const LISTING_LIMITS: Record<UserRole, number> = { individual: 5, agent: 200, builder: 500 };
+/**
+ * Free listings (live or under review) a user may hold without a paid plan.
+ * Owners get none: they fill in the listing, then take a plan to send it for review.
+ */
+export const LISTING_LIMITS: Record<UserRole, number> = { individual: 0, agent: 5, builder: 5 };
+
+/** Leads a month whose contact details a user sees without a paid plan. */
+export const FREE_LEADS_PER_MONTH: Record<UserRole, number> = {
+  individual: 0,
+  agent: 10,
+  builder: 10,
+};
+
+/** The plan created on first start, so the site has something to sell. Admins can edit it. */
+export const DEFAULT_PLAN = {
+  name: 'Premium',
+  description: 'For owners, agents and builders who want more listings and every lead.',
+  price: 599,
+  durationDays: 30,
+  listingLimit: 25,
+  leadLimit: 0,
+  featuredListings: 0,
+  featuredDays: 7,
+  roles: ['individual', 'agent', 'builder'] as UserRole[],
+} as const;
+
+/** Paid Featured for one live listing, on top of any plan. Rupees, GST included. */
+export const FEATURE_ADDONS = [
+  { days: 7, price: 49, label: '7 days' },
+  { days: 30, price: 99, label: '1 month' },
+] as const;
+export type FeatureAddonDays = (typeof FEATURE_ADDONS)[number]['days'];
+
+export const PAYMENT_KINDS = ['plan', 'featured'] as const;
+export type PaymentKind = (typeof PAYMENT_KINDS)[number];
+
+/** Days before a plan ends when we remind the user to renew. */
+export const PLAN_REMINDER_DAYS = 3;
 
 export const USER_STATUSES = ['active', 'blocked'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];

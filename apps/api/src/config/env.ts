@@ -37,6 +37,8 @@ const envSchema = z
     SMS_DRIVER: z.enum(['disabled', 'console', 'msg91']).default('disabled'),
     MSG91_AUTH_KEY: z.string().optional(),
     MSG91_TEMPLATE_ID: z.string().optional(),
+    /** Optional MSG91 Flow (DLT-approved) used to SMS a poster's number to a visitor: vars name, phone, title. */
+    MSG91_CONTACT_FLOW_ID: z.string().optional(),
     /** Launch testing: optional ISO date after which the fixed OTP 123456 stops working (a past date turns it off). See lib/test-otp.ts. */
     TEST_OTP_UNTIL: z.string().optional(),
     COOKIE_SECURE: bool,

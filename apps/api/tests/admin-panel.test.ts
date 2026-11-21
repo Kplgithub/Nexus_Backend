@@ -16,7 +16,7 @@ import {
 import { AdminNotification, Payment } from '../src/models/admin-panel.models.js';
 import { Property } from '../src/models/property.model.js';
 import { expireFeatured } from '../src/services/featured.service.js';
-import { razorpaySignatureValid } from '../src/services/billing.service.js';
+import { ensureDefaultPlan, razorpaySignatureValid } from '../src/services/billing.service.js';
 import { istDayStart } from '../src/services/charts.service.js';
 
 let app: Express;
@@ -311,31 +311,23 @@ describe('verification and featured listings', () => {
 });
 
 describe('plans and payments', () => {
-  it('records a manual payment that raises the listing limit until it ends', async () => {
+  it('releases an owner’s waiting listing when a plan is paid, and ends the plan on refund', async () => {
     const plan = await boss.post('/api/v1/admin/plans', {
       name: 'Owner Plus',
       price: 999,
       durationDays: 30,
-      listingLimit: 8,
-      featuredListings: 1,
+      listingLimit: 2,
       roles: ['individual'],
     });
     expect(plan.status).toBe(201);
     const owner = await signUpUser(app);
 
-    // Base limit for owners is 5.
-    for (let i = 0; i < 5; i++) {
-      const r = await owner.post(
-        '/api/v1/me/properties',
-        userListing({ status: 'pending', title: `3 BHK flat number ${i} near Gandhi Path` }),
-      );
-      expect(r.status).toBe(201);
-    }
-    const sixth = await owner.post(
+    // Owners have no free listings: the listing is saved and waits for a plan.
+    const held = await owner.post(
       '/api/v1/me/properties',
-      userListing({ status: 'pending', title: '3 BHK flat number six near Gandhi Path' }),
+      userListing({ status: 'pending', title: '3 BHK flat number one near Gandhi Path' }),
     );
-    expect(sixth.status).toBe(403);
+    expect(held.body.data).toMatchObject({ status: 'draft', awaitingPlan: true });
 
     const { s } = await addSubAdmin();
     const body = {
@@ -347,26 +339,142 @@ describe('plans and payments', () => {
     expect((await s.post('/api/v1/admin/payments/manual', body)).status).toBe(403);
     const paid = await boss.post('/api/v1/admin/payments/manual', body);
     expect(paid.status).toBe(201);
-    expect(paid.body.data).toMatchObject({ status: 'paid', method: 'manual', amount: 999 });
+    expect(paid.body.data).toMatchObject({
+      status: 'paid',
+      method: 'manual',
+      amount: 999,
+      kind: 'plan',
+    });
 
-    const again = await owner.post(
+    // The waiting listing went for review and used one of the plan's 2 slots.
+    const mine = await owner.get(`/api/v1/me/properties/${held.body.data.id}`);
+    expect(mine.body.data).toMatchObject({ status: 'pending', awaitingPlan: false });
+    const second = await owner.post(
       '/api/v1/me/properties',
-      userListing({ status: 'pending', title: '3 BHK flat number six near Gandhi Path' }),
+      userListing({ status: 'pending', title: '3 BHK flat number two near Gandhi Path' }),
     );
-    expect(again.status).toBe(201);
+    expect(second.body.data.status).toBe('pending');
+    const third = await owner.post(
+      '/api/v1/me/properties',
+      userListing({ status: 'pending', title: '3 BHK flat number three near Gandhi Path' }),
+    );
+    expect(third.status).toBe(403);
+    expect(third.body.error.code).toBe('LISTING_LIMIT');
+
     const dash = (await owner.get('/api/v1/me/dashboard')).body.data;
-    expect(dash.listingLimit).toBe(8);
+    expect(dash.usage).toMatchObject({ listings: { used: 2, limit: 2 }, premium: true });
     expect(dash.subscription.plan.name).toBe('Owner Plus');
 
     const summary = (await boss.get('/api/v1/admin/payments/summary')).body.data;
     expect(summary).toMatchObject({ thisMonth: 999, activeSubscriptions: 1, onlineEnabled: false });
-
-    // Payment rings the Super Admin's bell.
     expect(await AdminNotification.countDocuments({ kind: 'payment' })).toBe(1);
 
     const refund = await boss.post(`/api/v1/admin/payments/${paid.body.data.id}/refund`);
     expect(refund.body.data.status).toBe('refunded');
     expect((await owner.get('/api/v1/me/dashboard')).body.data.subscription).toBeNull();
+  });
+
+  it('creates the ₹599 Premium plan once on first start', async () => {
+    expect(await ensureDefaultPlan()).toBe(true);
+    expect(await ensureDefaultPlan()).toBe(false);
+    const agent = await signUpUser(app, 'agent');
+    const mine = (await agent.get('/api/v1/me/plans')).body.data;
+    expect(mine.plans).toHaveLength(1);
+    expect(mine.plans[0]).toMatchObject({
+      name: 'Premium',
+      price: 599,
+      durationDays: 30,
+      listingLimit: 25,
+      leadLimit: 0,
+      featuredListings: 0,
+    });
+    expect(mine.featureAddons).toEqual([
+      { days: 7, price: 49, label: '7 days' },
+      { days: 30, price: 99, label: '1 month' },
+    ]);
+    // A plan switched off disappears from the website.
+    await boss.patch(`/api/v1/admin/plans/${mine.plans[0].id}`, { active: false });
+    expect((await agent.get('/api/v1/me/plans')).body.data.plans).toHaveLength(0);
+  });
+
+  it('hides leads past the free 10 a month until the poster takes a plan', async () => {
+    await ensureDefaultPlan();
+    const agent = await signUpUser(app, 'agent');
+    const { id } = (await agent.post('/api/v1/me/properties', userListing({ status: 'pending' })))
+      .body.data;
+    await boss.post(`/api/v1/admin/properties/${id}/status`, { status: 'published' });
+    for (let i = 0; i < 12; i++) {
+      const r = await request(app)
+        .post('/api/v1/enquiries')
+        .send(enquiry({ propertyId: id, phone: `98291${String(10000 + i)}`, name: `Buyer ${i}` }));
+      expect(r.status).toBe(201);
+    }
+    const leads = (await agent.get('/api/v1/me/leads?limit=50')).body.data;
+    expect(leads).toHaveLength(12);
+    const locked = leads.filter((l: { locked: boolean }) => l.locked);
+    expect(locked).toHaveLength(2);
+    expect(locked[0]).toMatchObject({ name: 'Hidden lead', phone: '', email: null, message: '' });
+    expect(JSON.stringify(locked)).not.toContain('98291');
+    const usage = (await agent.get('/api/v1/me/dashboard')).body.data.usage;
+    expect(usage.leads).toMatchObject({ used: 10, limit: 10, locked: 2 });
+
+    const plan = (await agent.get('/api/v1/me/plans')).body.data.plans[0];
+    await boss.post('/api/v1/admin/payments/manual', {
+      userId: agent.user.id,
+      planId: plan.id,
+      amount: 599,
+    });
+    const after = (await agent.get('/api/v1/me/leads?limit=50')).body.data;
+    expect(after.filter((l: { locked: boolean }) => l.locked)).toHaveLength(0);
+    const u = (await agent.get('/api/v1/me/dashboard')).body.data.usage;
+    expect(u.leads).toMatchObject({ limit: null, locked: 0 });
+    // Premium badge shows on the listing.
+    const slug = (await agent.get(`/api/v1/me/properties/${id}`)).body.data.slug;
+    expect(
+      (await request(app).get(`/api/v1/properties/${slug}`)).body.data.property.poster.premium,
+    ).toBe(true);
+  });
+
+  it('features a live listing for 7 days on a ₹49 payment, which is not a subscription', async () => {
+    const agent = await signUpUser(app, 'agent');
+    const { id } = (await agent.post('/api/v1/me/properties', userListing({ status: 'pending' })))
+      .body.data;
+    // Not live yet: cannot be featured.
+    expect(
+      (await boss.post('/api/v1/admin/payments/manual-feature', { propertyId: id, days: 7 }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await agent.post(`/api/v1/me/properties/${id}/feature-checkout`, { days: 7 })).status,
+    ).toBe(503);
+    await boss.post(`/api/v1/admin/properties/${id}/status`, { status: 'published' });
+    expect(
+      (await agent.post(`/api/v1/me/properties/${id}/feature-checkout`, { days: 3 })).status,
+    ).toBe(422);
+    const paid = await boss.post('/api/v1/admin/payments/manual-feature', {
+      propertyId: id,
+      days: 7,
+      reference: 'Cash',
+    });
+    expect(paid.status).toBe(201);
+    expect(paid.body.data).toMatchObject({ kind: 'featured', amount: 49, status: 'paid' });
+    expect(paid.body.data.property.id).toBe(id);
+    const p = await Property.findById(id).lean();
+    expect(p!.featured).toBe(true);
+    const days = (p!.featuredUntil!.getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(6.9);
+    expect(days).toBeLessThan(7.1);
+    // Another month adds on top of the time left.
+    const month = await boss.post('/api/v1/admin/payments/manual-feature', {
+      propertyId: id,
+      days: 30,
+    });
+    expect(month.status).toBe(201);
+    const p2 = await Property.findById(id).lean();
+    expect((p2!.featuredUntil!.getTime() - Date.now()) / 86_400_000).toBeGreaterThan(36.9);
+    const dash = (await agent.get('/api/v1/me/dashboard')).body.data;
+    expect(dash.subscription).toBeNull();
+    expect(dash.usage.premium).toBe(false);
   });
 
   it('lists only matching active plans to users and refuses checkout when online payment is off', async () => {

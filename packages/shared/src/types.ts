@@ -1,6 +1,7 @@
 import type {
   AdminRole,
   AlertEvent,
+  PaymentKind,
   PaymentMethod,
   PaymentStatus,
   SiteVisitStatus,
@@ -69,6 +70,8 @@ export type ListingPoster = {
   name: string | null;
   companyName: string | null;
   verified: boolean;
+  /** Has an active paid plan. */
+  premium: boolean;
   /** True when a signed-in visitor may reveal this poster's phone number. */
   canRevealPhone: boolean;
   memberSince: string | null;
@@ -194,6 +197,10 @@ export type OwnListing = Omit<PublicProperty, 'status' | 'poster'> & {
   createdAt: string;
   enquiryCount: number;
   projectId: string | null;
+  /** Saved and complete, waiting for the user to take a plan before review. */
+  awaitingPlan: boolean;
+  /** Featured by the user with a plan feature, until this date. */
+  featuredUntil: string | null;
 };
 
 export type AdminProperty = OwnListing & {
@@ -348,7 +355,11 @@ export type ReceivedLead = Pick<
   | 'property'
   | 'project'
   | 'createdAt'
-> & { seen: boolean };
+> & {
+  seen: boolean;
+  /** Over the free lead limit: name, phone, email and message are hidden until a plan. */
+  locked: boolean;
+};
 
 /** An enquiry as seen by the visitor who sent it. */
 export type SentEnquiry = Pick<
@@ -392,6 +403,7 @@ export type PublicProfile = {
   about: string | null;
   reraNumber: string | null;
   verified: boolean;
+  premium: boolean;
   experienceYears: number | null;
   website: string | null;
   logoUrl: string | null;
@@ -423,6 +435,16 @@ export type UserDashboard = {
   listingLimit: number;
   recentLeads: ReceivedLead[];
   subscription: MySubscription;
+  usage: PlanUsage;
+};
+
+/** What a user has used of their free allowance or plan. */
+export type PlanUsage = {
+  listings: { used: number; limit: number };
+  /** Leads with contact details this period. limit null means no limit. */
+  leads: { used: number; limit: number | null; locked: number; periodStart: string };
+  awaitingPlan: number;
+  premium: boolean;
 };
 
 export type DashboardStats = {
@@ -761,6 +783,9 @@ export type Plan = {
   durationDays: number;
   listingLimit: number;
   featuredListings: number;
+  featuredDays: number;
+  /** 0 means no limit. */
+  leadLimit: number;
   roles: UserRole[];
   active: boolean;
   sortOrder: number;
@@ -768,6 +793,9 @@ export type Plan = {
 
 export type Payment = {
   id: string;
+  kind: PaymentKind;
+  /** For a Featured payment: the listing it featured. */
+  property: { id: string; title: string; slug: string } | null;
   user: { id: string; name: string; role: UserRole; phone: string } | null;
   plan: {
     id: string;
@@ -775,6 +803,8 @@ export type Payment = {
     durationDays: number;
     listingLimit: number;
     featuredListings: number;
+    featuredDays: number;
+    leadLimit: number;
   };
   amount: number;
   status: PaymentStatus;
