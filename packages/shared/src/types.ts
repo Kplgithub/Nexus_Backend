@@ -284,7 +284,7 @@ export type Faq = {
 
 export type HomeBanner = {
   id: string;
-  /** top: beside the photo tiles; middle: wide banner after agents; lower: two-up after tools. */
+  /** top: wide strip under the tiles; middle: wide banner after agents; lower: two-up after tools. */
   placement: 'top' | 'middle' | 'lower';
   imageUrl: string;
   title: string;
