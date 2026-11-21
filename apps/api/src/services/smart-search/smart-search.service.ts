@@ -26,6 +26,11 @@ export const smartSearchQuerySchema = z.object({
             .filter(Boolean),
         ),
     ),
+  /** The locality page the box sits on: used when the text names no place. */
+  locality: z
+    .string()
+    .regex(/^[a-z0-9-]{1,100}$/)
+    .optional(),
   /** "Raise my budget" button. */
   maxPrice: z.coerce.number().int().positive().max(1_000_000_000).optional(),
   page: z.coerce.number().int().min(1).max(10).default(1),
@@ -196,22 +201,21 @@ function chipsFor(i: Intent): SmartChip[] {
   return c;
 }
 
-/** "furnished 2 BHK flats" */
-function describeHomes(i: Intent, hinglish: boolean, count: number): string {
+/** "furnished 2 BHK flats" (English) or "furnished 2 BHK flat" (Hinglish). */
+function describeHomes(i: Intent): string {
   const parts: string[] = [];
-  if (i.furnishing) parts.push(i.furnishing === 'semi-furnished' ? 'semi-furnished' : i.furnishing);
+  if (i.furnishing) parts.push(i.furnishing);
   if (i.bedrooms) parts.push(`${i.bedrooms.join('/')} BHK`);
-  const noun =
-    i.typeLabel === 'PG'
-      ? 'PG'
-      : i.typeLabel
-        ? `${i.typeLabel.toLowerCase()}${count === 1 || hinglish ? '' : 's'}`
-        : hinglish
-          ? 'property'
-          : count === 1
-            ? 'property'
-            : 'properties';
-  parts.push(noun);
+  const label = i.typeLabel === 'PG' ? 'PG' : i.typeLabel?.toLowerCase();
+  parts.push(
+    label
+      ? i.hinglish || label === 'PG'
+        ? label
+        : `${label}s`
+      : i.hinglish
+        ? 'property'
+        : 'properties',
+  );
   return parts.join(' ');
 }
 
@@ -224,18 +228,19 @@ function summaryFor(i: Intent, exact: number, total: number): string {
         : `near ${i.near.name}`
       : '';
   const budget = i.maxPrice ? rupees(i.maxPrice) : null;
-  const what = describeHomes(i, i.hinglish, exact);
+  const what = describeHomes(i);
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   if (i.hinglish) {
     if (exact > 0) {
-      const loc = where ? (i.near && !i.localities.length ? `${where} ` : `${where} mein `) : '';
-      return `${loc}${budget ? `${budget} tak ke ` : ''}${exact} ${what} mile.`;
+      const loc = where ? (i.near && !i.localities.length ? `${where}, ` : `${where} mein `) : '';
+      return `${loc}${budget ? `${budget} tak ke ` : ''}${what}: ${n(exact, 'option mila', 'options mile')}.`;
     }
     if (total > 0)
       return `Bilkul aisa abhi nahi mila. Yeh sabse kareeb wale ${total} options hain.`;
     return 'Abhi is search se koi property nahi mili. Area ya budget badal ke dekhiye.';
   }
   if (exact > 0)
-    return `Found ${exact} ${what}${where ? ` ${i.near && !i.localities.length ? where : `in ${where}`}` : ''}${budget ? ` up to ${budget}` : ''}.`;
+    return `${n(exact, 'match', 'matches')}: ${what}${where ? ` ${i.near && !i.localities.length ? where : `in ${where}`}` : ''}${budget ? ` up to ${budget}` : ''}.`;
   if (total > 0) return `No exact match yet. Here are the ${total} closest options.`;
   return 'Nothing matches this search yet. Try another area or budget.';
 }
@@ -282,11 +287,22 @@ function candidateFilter(i: Intent, city: string): FilterQuery<PropertyAttrs> {
   return f;
 }
 
+/** Up to five reasons; what differs is always shown, matches fill the rest. */
+function pickReasons(all: MatchReason[]): MatchReason[] {
+  const misses = all.filter((r) => r.level !== 'yes').slice(0, 3);
+  const hits = all.filter((r) => r.level === 'yes').slice(0, 5 - misses.length);
+  return [...hits, ...misses];
+}
+
 const MATCH_FIELDS = `${CARD_FIELDS} amenities parking pgFoodIncluded preferredTenants`;
 
 export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchResponse> {
   const { city, localities, centers } = await places();
   const intent = parseQuery(q.q, { localities, deal: q.deal });
+  if (q.locality && !intent.localities.length && !intent.near) {
+    const here = localities.find((l) => l.slug === q.locality);
+    if (here) intent.localities.push(here);
+  }
   applyDrops(intent, q.drop);
   if (q.maxPrice) intent.maxPrice = q.maxPrice;
   const keys = understoodKeys(intent);
@@ -318,7 +334,7 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
     : scored;
   if (!kept.length) kept = scored.slice(0, PAGE);
   const list = kept.slice(0, MAX_RESULTS);
-  const exactCount = list.filter((x) => x.s.exact).length;
+  const exactCount = understood ? list.filter((x) => x.s.exact).length : 0;
 
   let budgetSuggestion: SmartSearchResponse['budgetSuggestion'] = null;
   if (intent.maxPrice && !q.maxPrice) {
@@ -345,8 +361,8 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
     ...toCard(x.row),
     match: {
       score: Math.round(x.s.score * 100) / 100,
-      exact: x.s.exact,
-      reasons: x.s.reasons.slice(0, 4),
+      exact: understood && x.s.exact,
+      reasons: pickReasons(x.s.reasons),
     },
   }));
 

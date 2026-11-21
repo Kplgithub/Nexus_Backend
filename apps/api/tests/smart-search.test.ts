@@ -162,7 +162,7 @@ describe('GET /smart-search', () => {
     expect(d.items[0].match.reasons.map((r: { label: string }) => r.label)).toContain(
       'Vaishali Nagar',
     );
-    expect(d.summary).toMatch(/mile/);
+    expect(d.summary).toMatch(/option mila/);
     expect(d.chips.map((c: { key: string }) => c.key)).toEqual(
       expect.arrayContaining([
         'deal',
@@ -195,6 +195,14 @@ describe('GET /smart-search', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.total).toBe(2);
     expect(res.body.data.notUnderstoodQueries[0].text).toBe('hello there');
+  });
+
+  it('uses the locality page as the place when the text names none', async () => {
+    const res = await get({ q: '2bhk furnished 15000 tak', locality: 'malviya-nagar' });
+    expect(res.body.data.chips.map((c: { key: string }) => c.key)).toContain(
+      'locality:malviya-nagar',
+    );
+    expect(res.body.data.items[0].title).toBe('Far away 2 BHK');
   });
 
   it('rejects empty or very long text', async () => {

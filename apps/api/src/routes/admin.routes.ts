@@ -198,7 +198,7 @@ adminRouter.get('/activity', requireRole('admin'), async (req, res) => {
 
 adminRouter.get('/search-insights', async (req, res) => {
   const { days } = parseQuery(
-    z.object({ days: z.coerce.number().int().min(1).max(180).default(30) }),
+    z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }),
     req,
   );
   ok(res, await searchInsights(days));

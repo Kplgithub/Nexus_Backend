@@ -335,6 +335,11 @@ const TYPE_RULES: [RegExp, PropertyType[], string][] = [
   [/\b(plots?|land|zameen|jameen)\b/, ['plot'], 'Plot'],
   [/\b(flats?|apartments?)\b/, ['apartment', 'builder-floor', 'studio'], 'Flat'],
   [/\b(rooms?|kamra|kamre|1 ?rk)\b/, ['studio', 'pg', 'apartment'], 'Room'],
+  [
+    /\bcommercial\b/,
+    ['office', 'shop', 'showroom', 'commercial-building', 'coworking', 'other-commercial'],
+    'Commercial',
+  ],
 ];
 
 const AMENITY_RULES: [RegExp, Amenity][] = [

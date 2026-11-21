@@ -184,6 +184,7 @@ export const openApiDocument = {
         parameters: [
           q('q', { type: 'string' }, 'What the visitor typed (1–200 characters)'),
           q('deal', { type: 'string', enum: ['rent', 'sale'] }, 'The page the box sits on'),
+          q('locality', { type: 'string' }, 'Locality page the box sits on (default place)'),
           q('drop', { type: 'string' }, 'Comma separated chip keys the visitor removed'),
           q('maxPrice', { type: 'integer' }, 'Overrides the budget ("raise budget")'),
           q('page', { type: 'integer' }),
