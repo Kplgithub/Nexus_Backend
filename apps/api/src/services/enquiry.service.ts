@@ -11,7 +11,7 @@ import {
   type enquiryCreateSchema,
   type enquiryUpdateSchema,
 } from '@nexus/shared';
-import { Enquiry } from '../models/misc.models.js';
+import { Admin, Enquiry } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
 import { Project } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
@@ -23,6 +23,7 @@ import { toCsv } from '../lib/csv.js';
 import { nextLeadId } from './support.service.js';
 import { getSettings } from './settings.service.js';
 import { notifyNewLead, sendMail } from './mail.service.js';
+import { businessAlert, getAlertSettings, notifyAdmins } from './notification.service.js';
 
 const CONSENT_TEXT =
   'I agree to be contacted by NEXUS Estate by phone, WhatsApp or email about this enquiry.';
@@ -50,6 +51,7 @@ type EnquiryLean = {
   status: EnquiryDto['status'];
   followUpAt?: Date | null;
   assignedTo?: string | null;
+  assignedAdmin?: Types.ObjectId | { _id: Types.ObjectId; name: string } | null;
   notes: { text: string; by: string; at: Date }[];
   consentAt: Date;
   createdAt: Date;
@@ -58,6 +60,12 @@ type EnquiryLean = {
   listingOwner?: Types.ObjectId | { _id: Types.ObjectId; name: string } | null;
   seenByOwner?: boolean;
 };
+
+function adminRefOf(a: EnquiryLean['assignedAdmin']): EnquiryDto['assignedAdmin'] {
+  if (!a) return null;
+  if (a instanceof MTypes.ObjectId) return { id: String(a), name: '' };
+  return { id: String(a._id), name: a.name };
+}
 
 function ownerRef(o: EnquiryLean['listingOwner']): EnquiryDto['listingOwner'] {
   if (!o) return null;
@@ -102,6 +110,7 @@ function toDto(e: EnquiryLean): EnquiryDto {
     status: e.status,
     followUpAt: e.followUpAt ? e.followUpAt.toISOString() : null,
     assignedTo: e.assignedTo ?? null,
+    assignedAdmin: adminRefOf(e.assignedAdmin),
     notes: (e.notes ?? []).map((n) => ({
       text: n.text,
       by: n.by,
@@ -220,7 +229,8 @@ export async function createEnquiry(
   }
   const about = property?.title ?? project?.name;
   if (!spam) {
-    void notifyNewLead(`New enquiry ${leadId}${about ? ` — ${about}` : ''}`, {
+    void leadAlert(leadId, input.name, about);
+    void sendLeadEmail(`New enquiry ${leadId}${about ? ` — ${about}` : ''}`, {
       'Lead ID': leadId,
       Name: input.name,
       Phone: phone,
@@ -232,6 +242,24 @@ export async function createEnquiry(
     });
   }
   return { leadId, duplicate: false };
+}
+
+async function sendLeadEmail(subject: string, fields: Record<string, string | null | undefined>) {
+  await notifyNewLead(subject, fields, await leadEmailRecipients().catch(() => []));
+}
+
+/** Bell + WhatsApp for staff. Email goes out once, through notifyNewLead, with full details. */
+async function leadAlert(leadId: string, name: string, about?: string) {
+  const e = await Enquiry.findOne({ leadId }).select('_id').lean();
+  await businessAlert(
+    'lead',
+    {
+      title: `New enquiry from ${name}`,
+      body: about ? `About ${about} (${leadId})` : leadId,
+      link: e ? `/admin/enquiries?open=${String(e._id)}` : '/admin/enquiries',
+    },
+    { skipEmail: true },
+  );
 }
 
 async function notifyListingOwner(
@@ -254,22 +282,29 @@ async function notifyListingOwner(
   );
 }
 
-export async function listEnquiries(q: z.output<typeof adminEnquiryQuerySchema>) {
-  const f = enquiryFilter(q);
+export async function listEnquiries(q: z.output<typeof adminEnquiryQuerySchema>, adminId?: string) {
+  const f = enquiryFilter(q, adminId);
   const [rows, total] = await Promise.all([
     Enquiry.find(f)
       .sort({ createdAt: -1 })
       .skip((q.page - 1) * q.limit)
       .limit(q.limit)
       .populate('listingOwner', 'name')
+      .populate('assignedAdmin', 'name')
       .lean<EnquiryLean[]>(),
     Enquiry.countDocuments(f),
   ]);
   return { items: rows.map(toDto), meta: paginate(q.page, q.limit, total) };
 }
 
-function enquiryFilter(q: z.output<typeof adminEnquiryQuerySchema>): FilterQuery<EnquiryLean> {
+function enquiryFilter(
+  q: z.output<typeof adminEnquiryQuerySchema>,
+  adminId?: string,
+): FilterQuery<EnquiryLean> {
   const f: FilterQuery<EnquiryLean> = {};
+  if (q.assignee === 'none') f.assignedAdmin = null;
+  else if (q.assignee === 'me' && adminId) f.assignedAdmin = new MTypes.ObjectId(adminId);
+  else if (q.assignee && q.assignee !== 'me') f.assignedAdmin = new MTypes.ObjectId(q.assignee);
   if (q.status) f.status = q.status;
   else f.status = { $ne: 'spam' };
   if (q.type) f.type = q.type;
@@ -296,7 +331,10 @@ function enquiryFilter(q: z.output<typeof adminEnquiryQuerySchema>): FilterQuery
 }
 
 export async function getEnquiry(id: string) {
-  const e = await Enquiry.findById(id).populate('listingOwner', 'name').lean<EnquiryLean>();
+  const e = await Enquiry.findById(id)
+    .populate('listingOwner', 'name')
+    .populate('assignedAdmin', 'name')
+    .lean<EnquiryLean>();
   if (!e) throw notFound('Enquiry not found');
   return toDto(e);
 }
@@ -308,12 +346,56 @@ export async function updateEnquiry(
 ) {
   const e = await Enquiry.findById(id);
   if (!e) throw notFound('Enquiry not found');
-  if (patch.status) e.status = patch.status;
+  if (patch.status) {
+    if (patch.status !== 'new' && !e.contactedAt) e.contactedAt = new Date();
+    e.status = patch.status;
+  }
   if (patch.followUpAt !== undefined) e.followUpAt = patch.followUpAt;
   if (patch.assignedTo !== undefined) e.assignedTo = patch.assignedTo || null;
   if (patch.note) e.notes.push({ text: patch.note, by, at: new Date() });
   await e.save();
-  return toDto(e.toObject() as unknown as EnquiryLean);
+  return getEnquiry(id);
+}
+
+/** Give a lead to a team member (or take it back with null). The assignee gets a bell alert. */
+export async function assignLead(
+  id: string,
+  adminId: string | null,
+  by: { id: string; name: string },
+) {
+  const e = await Enquiry.findById(id);
+  if (!e) throw notFound('Enquiry not found');
+  let name: string | null = null;
+  if (adminId) {
+    const a = await Admin.findOne({ _id: adminId, active: true }).select('name').lean();
+    if (!a) throw badRequest('Choose an active team member');
+    name = a.name;
+  }
+  e.assignedAdmin = adminId ? new MTypes.ObjectId(adminId) : null;
+  e.assignedTo = name;
+  e.assignedAt = adminId ? new Date() : null;
+  e.notes.push({
+    text: adminId ? `Assigned to ${name}` : 'Unassigned',
+    by: by.name,
+    at: new Date(),
+  });
+  await e.save();
+  if (adminId && adminId !== by.id) {
+    void notifyAdmins({
+      kind: 'assigned',
+      to: [adminId],
+      title: `${by.name} gave you a lead: ${e.name}`,
+      body: e.propertySnapshot?.title ?? e.leadId,
+      link: `/admin/enquiries?open=${id}`,
+    });
+  }
+  return getEnquiry(id);
+}
+
+/** Extra recipients for lead emails, from alert settings. */
+export async function leadEmailRecipients() {
+  const s = await getAlertSettings();
+  return s.events.lead ? s.emails : [];
 }
 
 export async function exportEnquiriesCsv(

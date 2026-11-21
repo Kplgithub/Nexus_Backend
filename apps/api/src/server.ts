@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { connectDb, disconnectDb } from './db.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
+import { expireFeatured } from './services/featured.service.js';
 
 async function main() {
   await connectDb();
@@ -11,6 +12,11 @@ async function main() {
   );
   server.keepAliveTimeout = 65_000; // longer than Nginx's upstream keepalive
   server.headersTimeout = 66_000;
+
+  // Featured placements end on their date.
+  const sweep = () => void expireFeatured().catch((err) => logger.warn({ err }, 'expire sweep'));
+  sweep();
+  setInterval(sweep, 10 * 60_000).unref();
 
   let shuttingDown = false;
   const shutdown = (signal: string) => {

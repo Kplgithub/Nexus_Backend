@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import {
+  ALERT_EVENTS,
+  FEATURE_DAYS,
+  PAYMENT_STATUSES,
+  SITE_VISIT_STATUSES,
+  TEAM_ROLES,
+  VERIFICATION_STATUSES,
+  type AlertEvent,
   ALL_PROPERTY_TYPES,
   BLOG_CATEGORIES,
   BLOG_STATUSES,
@@ -524,6 +531,13 @@ export const adminEnquiryQuerySchema = z.object({
   from: z.coerce.date().optional().catch(undefined),
   to: z.coerce.date().optional().catch(undefined),
   followUpDue: queryBool,
+  /** "me", "none" or a team member id. */
+  assignee: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v === 'me' || v === 'none' || (v && /^[a-f0-9]{24}$/i.test(v)) ? v : undefined,
+    ),
   page: queryNumber(1, 10_000).transform((v) => v ?? 1),
   limit: queryNumber(1, 100).transform((v) => v ?? 20),
 });
@@ -1042,4 +1056,190 @@ export const adminBlogQuerySchema = z.object({
     .transform((v) => (v ? v.trim().slice(0, 80) || undefined : undefined)),
   page: queryNumber(1, 10_000).transform((v) => v ?? 1),
   limit: queryNumber(1, 100).transform((v) => v ?? 20),
+});
+
+/* ------------------------------------------------------------------ */
+/* Admin panel: team, activity, charts, visits, verification, plans    */
+/* ------------------------------------------------------------------ */
+
+export const teamCreateSchema = z.object({
+  name: plainText(2, 80),
+  email,
+  password: passwordPolicy,
+  role: z.enum(TEAM_ROLES),
+});
+export type TeamCreateInput = z.input<typeof teamCreateSchema>;
+
+export const teamUpdateSchema = z
+  .object({
+    name: plainText(2, 80),
+    role: z.enum(TEAM_ROLES),
+    active: z.boolean(),
+  })
+  .partial()
+  .strict();
+
+/** A Super Admin setting someone else's password (team member or website user). */
+export const setPasswordSchema = z.object({ password: passwordPolicy });
+export const setUserPasswordSchema = z.object({ password: userPasswordPolicy });
+
+export const activityQuerySchema = z.object({
+  actor: z
+    .string()
+    .optional()
+    .transform((v) => (v && /^[a-f0-9]{24}$/i.test(v) ? v : undefined)),
+  entity: z
+    .string()
+    .optional()
+    .transform((v) => (v && /^[a-z-]{2,30}$/.test(v) ? v : undefined)),
+  from: z.coerce.date().optional().catch(undefined),
+  to: z.coerce.date().optional().catch(undefined),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 30),
+});
+
+export const dashboardChartsQuerySchema = z.object({
+  days: z
+    .union([z.string(), z.number()])
+    .optional()
+    .transform((v) => {
+      const n = Number(v);
+      return n === 1 || n === 7 || n === 90 ? n : 30;
+    }),
+});
+
+/** "me", "none" or a team member id. */
+const assigneeQuery = z
+  .string()
+  .optional()
+  .transform((v) =>
+    v === 'me' || v === 'none' || (v && /^[a-f0-9]{24}$/i.test(v)) ? v : undefined,
+  );
+
+export const leadAssignSchema = z.object({ adminId: objectIdSchema.nullable() });
+
+export const siteVisitCreateSchema = z.object({
+  enquiryId: objectIdSchema.optional(),
+  propertyId: objectIdSchema.optional(),
+  name: plainText(2, 80),
+  phone: phoneInput,
+  scheduledAt: z.coerce.date(),
+  assignedAdminId: objectIdSchema.nullable().optional(),
+  note: plainText(0, 1000).optional(),
+});
+export type SiteVisitCreateInput = z.input<typeof siteVisitCreateSchema>;
+
+export const siteVisitUpdateSchema = z
+  .object({
+    scheduledAt: z.coerce.date(),
+    status: z.enum(SITE_VISIT_STATUSES),
+    assignedAdminId: objectIdSchema.nullable(),
+    outcome: plainText(0, 1000),
+    note: plainText(1, 1000),
+  })
+  .partial()
+  .strict();
+
+export const siteVisitQuerySchema = z.object({
+  from: z.coerce.date().optional().catch(undefined),
+  to: z.coerce.date().optional().catch(undefined),
+  status: queryEnum(SITE_VISIT_STATUSES),
+  assignee: assigneeQuery,
+  enquiryId: z
+    .string()
+    .optional()
+    .transform((v) => (v && /^[a-f0-9]{24}$/i.test(v) ? v : undefined)),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 500).transform((v) => v ?? 100),
+});
+
+export const verificationDecisionSchema = z.object({
+  decision: z.enum(['verified', 'rejected', 'unverified']),
+  note: plainText(0, 1000).optional(),
+});
+
+export const verificationQuerySchema = z.object({
+  status: queryEnum(VERIFICATION_STATUSES),
+  role: queryEnum(['agent', 'builder'] as const),
+  q: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.trim().slice(0, 80) || undefined : undefined)),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 20),
+});
+
+export const featureListingSchema = z.object({
+  /** 0 removes the listing from featured. */
+  days: z.union([z.literal(0), ...FEATURE_DAYS.map((d) => z.literal(d))]),
+});
+
+export const planSchema = z.object({
+  name: plainText(2, 60),
+  description: plainText(0, 300).default(''),
+  /** Rupees, GST included. */
+  price: z.number().int().min(1).max(10_000_000),
+  durationDays: z.number().int().min(1).max(730),
+  listingLimit: z.number().int().min(1).max(10_000),
+  featuredListings: z.number().int().min(0).max(1000).default(0),
+  roles: z.array(z.enum(USER_ROLES)).min(1),
+  active: z.boolean().default(true),
+  sortOrder: z.number().int().min(0).max(1000).default(0),
+});
+export type PlanInput = z.input<typeof planSchema>;
+export const planUpdateSchema = planSchema.partial().strict();
+
+export const manualPaymentSchema = z.object({
+  userId: objectIdSchema,
+  planId: objectIdSchema,
+  amount: z.number().int().min(0).max(10_000_000),
+  reference: plainText(0, 120).default(''),
+  note: plainText(0, 500).default(''),
+});
+
+export const paymentQuerySchema = z.object({
+  status: queryEnum(PAYMENT_STATUSES),
+  q: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.trim().slice(0, 80) || undefined : undefined)),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 20),
+});
+
+export const paymentVerifySchema = z.object({
+  orderId: z.string().trim().min(5).max(64),
+  paymentId: z.string().trim().min(5).max(64),
+  signature: z
+    .string()
+    .trim()
+    .regex(/^[a-f0-9]{64}$/i, 'Invalid signature'),
+});
+
+export const alertSettingsSchema = z.object({
+  emails: z.array(email).max(10).default([]),
+  /** International format, e.g. +919521750202. */
+  whatsappNumbers: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(/^\+[1-9]\d{7,14}$/, 'Use international format, e.g. +919521750202'),
+    )
+    .max(10)
+    .default([]),
+  events: z
+    .object(
+      Object.fromEntries(ALERT_EVENTS.map((e) => [e, z.boolean().default(true)])) as Record<
+        AlertEvent,
+        z.ZodDefault<z.ZodBoolean>
+      >,
+    )
+    .default(Object.fromEntries(ALERT_EVENTS.map((e) => [e, true])) as Record<AlertEvent, boolean>),
+});
+export const alertSettingsUpdateSchema = alertSettingsSchema.partial();
+
+export const notificationReadSchema = z.object({
+  ids: z.array(objectIdSchema).max(200).optional(),
+  all: z.boolean().optional(),
 });

@@ -62,6 +62,11 @@ const enquirySchema = new Schema(
     status: { type: String, enum: ENQUIRY_STATUSES, default: 'new' },
     followUpAt: { type: Date, default: null },
     assignedTo: { type: String, maxlength: 80, default: null },
+    /** Team member working this lead. */
+    assignedAdmin: { type: Schema.Types.ObjectId, ref: 'Admin', default: null },
+    assignedAt: { type: Date, default: null },
+    /** First time the lead moved past "new"; used for response-time numbers. */
+    contactedAt: { type: Date, default: null },
     notes: { type: [noteSchema], default: [] },
     consentAt: { type: Date, required: true },
     consentText: { type: String, maxlength: 300 },
@@ -85,6 +90,7 @@ enquirySchema.index({ phone: 1, createdAt: -1 });
 enquirySchema.index({ listingOwner: 1, createdAt: -1 });
 enquirySchema.index({ user: 1, createdAt: -1 });
 enquirySchema.index({ project: 1, createdAt: -1 });
+enquirySchema.index({ assignedAdmin: 1, status: 1, createdAt: -1 });
 export const Enquiry = model('Enquiry', enquirySchema);
 
 /* ---------------- Locations ---------------- */
@@ -206,6 +212,7 @@ const auditSchema = new Schema(
 );
 auditSchema.index({ createdAt: -1 });
 auditSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
+auditSchema.index({ actor: 1, createdAt: -1 });
 export const AuditLog = model('AuditLog', auditSchema);
 
 /* ---------------- Counters (for human-readable lead IDs) ---------------- */

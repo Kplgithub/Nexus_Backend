@@ -57,6 +57,17 @@ const envSchema = z
     SMTP_PASS: z.string().optional(),
     MAIL_FROM: z.string().optional(),
 
+    /** WhatsApp Cloud API (Meta) for staff alerts. Unset = WhatsApp alerts off. */
+    WHATSAPP_TOKEN: z.string().optional(),
+    WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+    /** Approved utility template with one body variable ({{1}}) that carries the alert text. */
+    WHATSAPP_TEMPLATE: z.string().default('nexus_alert'),
+    WHATSAPP_TEMPLATE_LANG: z.string().default('en'),
+
+    /** Razorpay for paid plans. Unset = online payment off (manual payments still work). */
+    RAZORPAY_KEY_ID: z.string().optional(),
+    RAZORPAY_KEY_SECRET: z.string().optional(),
+
     ENABLE_API_DOCS: bool,
     /** Seconds; public GET responses get Cache-Control: public, s-maxage=... */
     PUBLIC_CACHE_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
@@ -139,3 +150,5 @@ export const corsOrigins = env.CORS_ORIGINS.split(',')
   .filter(Boolean);
 export const mailEnabled = Boolean(env.SMTP_HOST && env.MAIL_FROM);
 export const otpEnabled = env.SMS_DRIVER !== 'disabled';
+export const whatsappEnabled = Boolean(env.WHATSAPP_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID);
+export const razorpayEnabled = Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
