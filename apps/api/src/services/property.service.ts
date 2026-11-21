@@ -323,10 +323,10 @@ async function enquiryCounts(ids: Types.ObjectId[]) {
 /* Public search                                                       */
 /* ------------------------------------------------------------------ */
 
-const CARD_FIELDS =
+export const CARD_FIELDS =
   'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType geo plotApproval pgGender';
 
-const VISIBLE = { status: 'published', listingVisibility: 'public' } as const;
+export const VISIBLE = { status: 'published', listingVisibility: 'public' } as const;
 
 export function buildPublicFilter(
   q: PropertySearch,
