@@ -14,9 +14,12 @@ import {
   projectCreateSchema,
   projectUpdateSchema,
   PROJECT_STATUSES,
+  paymentVerifySchema,
   type PropertyCard,
 } from '@nexus/shared';
+import * as billing from '../services/billing.service.js';
 import { limiters } from '../middleware/security.js';
+import { razorpayEnabled } from '../config/env.js';
 import { onlySentKeys, parseBody, parseId, parseQuery } from '../middleware/validate.js';
 import { clearUserSession, issueUserSession, requireUser } from '../middleware/user-auth.js';
 import { created, ok } from '../lib/respond.js';
@@ -252,3 +255,22 @@ meRouter.post('/contact/:id', limiters.userWrite, async (req, res) => {
     }),
   );
 });
+
+/* ---------------- Paid plans ---------------- */
+
+meRouter.get('/plans', async (req, res) => {
+  const [plans, subscription, payments] = await Promise.all([
+    billing.listPlans(true, req.user!.role),
+    billing.activeSubscription(req.user!.id),
+    billing.myPayments(req.user!.id),
+  ]);
+  ok(res, { plans, subscription, payments, onlineEnabled: razorpayEnabled });
+});
+
+meRouter.post('/plans/:id/checkout', limiters.userWrite, async (req, res) =>
+  ok(res, await billing.createCheckout(req.user!.id, parseId(req))),
+);
+
+meRouter.post('/payments/verify', limiters.userWrite, async (req, res) =>
+  ok(res, await billing.confirmCheckout(req.user!.id, parseBody(paymentVerifySchema, req))),
+);

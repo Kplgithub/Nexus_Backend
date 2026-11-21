@@ -26,7 +26,33 @@ import {
   blogAnalyticsQuerySchema,
   blogPostCreateSchema,
   blogPostUpdateSchema,
+  activityQuerySchema,
+  alertSettingsUpdateSchema,
+  dashboardChartsQuerySchema,
+  featureListingSchema,
+  isSuperAdmin,
+  leadAssignSchema,
+  manualPaymentSchema,
+  notificationReadSchema,
+  paymentQuerySchema,
+  planSchema,
+  planUpdateSchema,
+  setPasswordSchema,
+  setUserPasswordSchema,
+  siteVisitCreateSchema,
+  siteVisitQuerySchema,
+  siteVisitUpdateSchema,
+  teamCreateSchema,
+  teamUpdateSchema,
+  verificationDecisionSchema,
+  verificationQuerySchema,
 } from '@nexus/shared';
+import { getBadges, getCharts } from '../services/charts.service.js';
+import * as team from '../services/team.service.js';
+import * as visits from '../services/site-visit.service.js';
+import * as billing from '../services/billing.service.js';
+import * as featured from '../services/featured.service.js';
+import * as alerts from '../services/notification.service.js';
 import { clearSession, issueSession, requireAuth, requireRole } from '../middleware/auth.js';
 import { limiters } from '../middleware/security.js';
 import { onlySentKeys, parseBody, parseId, parseQuery } from '../middleware/validate.js';
@@ -104,6 +130,84 @@ adminRouter.post('/auth/logout-all', async (req, res) => {
 
 adminRouter.get('/dashboard', async (_req, res) => ok(res, await getDashboard()));
 
+adminRouter.get('/dashboard/charts', async (req, res) => {
+  const { days } = parseQuery(dashboardChartsQuerySchema, req);
+  ok(res, await getCharts(days, isSuperAdmin(req.admin!.role)));
+});
+
+// Small counts for the sidebar badges; cheap enough to poll.
+adminRouter.get('/badges', async (req, res) => ok(res, await getBadges(req.admin!.id)));
+
+/* ---------------- Notifications (bell) ---------------- */
+
+adminRouter.get('/notifications', async (req, res) =>
+  ok(res, await alerts.listNotifications(req.admin!.id, req.query.unread === '1')),
+);
+
+adminRouter.post('/notifications/read', async (req, res) => {
+  const { ids, all } = parseBody(notificationReadSchema, req);
+  await alerts.markRead(req.admin!.id, all ? undefined : ids);
+  ok(res, { read: true });
+});
+
+/* ---------------- Team (Super Admin) ---------------- */
+
+// Names of active team members, for "assign to" pickers. Everyone may read.
+adminRouter.get('/team/assignees', async (_req, res) => ok(res, await team.listAssignees()));
+
+adminRouter.get('/team', requireRole('admin'), async (_req, res) => ok(res, await team.listTeam()));
+
+adminRouter.post('/team', requireRole('admin'), async (req, res) => {
+  const m = await team.createMember(parseBody(teamCreateSchema, req));
+  await audit(req.admin, 'create', 'team', m.id, `${m.name} (${m.role})`);
+  created(res, m);
+});
+
+adminRouter.patch('/team/:id', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const patch = onlySentKeys(parseBody(teamUpdateSchema, req), req.body);
+  if (!Object.keys(patch).length) throw badRequest('Nothing to update');
+  const m = await team.updateMember(id, patch, req.admin!.id);
+  await audit(
+    req.admin,
+    patch.active === false ? 'deactivate' : patch.active ? 'activate' : 'update',
+    'team',
+    id,
+    `${m.name}: ${Object.keys(patch).join(', ')}`,
+  );
+  ok(res, m);
+});
+
+adminRouter.post('/team/:id/password', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const { password } = parseBody(setPasswordSchema, req);
+  const m = await team.setMemberPassword(id, password);
+  await audit(req.admin, 'set-password', 'team', id, m.name);
+  ok(res, { changed: true });
+});
+
+adminRouter.get('/activity', requireRole('admin'), async (req, res) => {
+  const { items, meta } = await team.listActivity(parseQuery(activityQuerySchema, req));
+  ok(res, items, meta);
+});
+
+/* ---------------- Alert settings (Super Admin) ---------------- */
+
+adminRouter.get('/alerts', requireRole('admin'), async (_req, res) =>
+  ok(res, { settings: await alerts.getAlertSettings(), channels: alerts.alertChannels() }),
+);
+
+adminRouter.patch('/alerts', requireRole('admin'), async (req, res) => {
+  const patch = onlySentKeys(parseBody(alertSettingsUpdateSchema, req), req.body);
+  const settings = await alerts.updateAlertSettings(patch);
+  await audit(req.admin, 'update', 'alerts', undefined, Object.keys(patch).join(', '));
+  ok(res, { settings, channels: alerts.alertChannels() });
+});
+
+adminRouter.post('/alerts/test', requireRole('admin'), async (req, res) =>
+  ok(res, await alerts.sendTestAlert(req.admin!.name)),
+);
+
 /* ---------------- Properties ---------------- */
 
 adminRouter.get('/properties', async (req, res) => {
@@ -175,6 +279,16 @@ adminRouter.post('/properties/:id/status', requireRole('editor'), async (req, re
   await audit(req.admin, `status:${status}`, 'property', id, p.title);
   ok(res, p);
 });
+
+adminRouter.post('/properties/:id/feature', requireRole('editor'), async (req, res) => {
+  const id = parseId(req);
+  const { days } = parseBody(featureListingSchema, req);
+  const p = await featured.setFeatured(id, days);
+  await audit(req.admin, days ? `feature:${days}d` : 'unfeature', 'property', id, p.title);
+  ok(res, p);
+});
+
+adminRouter.get('/featured', async (_req, res) => ok(res, await featured.listFeatured()));
 
 adminRouter.delete('/properties/:id', requireRole('admin'), async (req, res) => {
   const id = parseId(req);
@@ -280,7 +394,10 @@ adminRouter.post(
 /* ---------------- Enquiries ---------------- */
 
 adminRouter.get('/enquiries', async (req, res) => {
-  const { items, meta } = await leads.listEnquiries(parseQuery(adminEnquiryQuerySchema, req));
+  const { items, meta } = await leads.listEnquiries(
+    parseQuery(adminEnquiryQuerySchema, req),
+    req.admin!.id,
+  );
   ok(res, items, meta);
 });
 
@@ -312,6 +429,122 @@ adminRouter.patch('/enquiries/:id', async (req, res) => {
   ok(res, e);
 });
 
+adminRouter.post('/enquiries/:id/assign', async (req, res) => {
+  const id = parseId(req);
+  const { adminId } = parseBody(leadAssignSchema, req);
+  const e = await leads.assignLead(id, adminId, req.admin!);
+  await audit(
+    req.admin,
+    adminId ? 'assign' : 'unassign',
+    'enquiry',
+    id,
+    `${e.leadId}${e.assignedTo ? ` → ${e.assignedTo}` : ''}`,
+  );
+  ok(res, e);
+});
+
+/* ---------------- Site visits ---------------- */
+
+adminRouter.get('/visits', async (req, res) => {
+  const { items, meta } = await visits.listVisits(
+    parseQuery(siteVisitQuerySchema, req),
+    req.admin!.id,
+  );
+  ok(res, items, meta);
+});
+
+adminRouter.post('/visits', async (req, res) => {
+  const v = await visits.createVisit(parseBody(siteVisitCreateSchema, req), req.admin!);
+  await audit(
+    req.admin,
+    'create',
+    'visit',
+    v.id,
+    `${v.name}${v.enquiry ? ` (${v.enquiry.leadId})` : ''}`,
+  );
+  created(res, v);
+});
+
+adminRouter.patch('/visits/:id', async (req, res) => {
+  const id = parseId(req);
+  const patch = onlySentKeys(parseBody(siteVisitUpdateSchema, req), req.body);
+  if (!Object.keys(patch).length) throw badRequest('Nothing to update');
+  const { visit, changes } = await visits.updateVisit(id, patch, req.admin!);
+  await audit(req.admin, changes[0] ?? 'update', 'visit', id, visit.name);
+  ok(res, visit);
+});
+
+adminRouter.delete('/visits/:id', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const v = await visits.deleteVisit(id);
+  await audit(req.admin, 'delete', 'visit', id, v.name);
+  ok(res, { deleted: true });
+});
+
+/* ---------------- Agent & builder verification ---------------- */
+
+adminRouter.get('/verification', async (req, res) => {
+  const { items, meta, counts } = await adminUsers.listVerification(
+    parseQuery(verificationQuerySchema, req),
+  );
+  res.json({ ok: true, data: items, meta, counts });
+});
+
+adminRouter.post('/users/:id/verification', requireRole('editor'), async (req, res) => {
+  const id = parseId(req);
+  const input = parseBody(verificationDecisionSchema, req);
+  const u = await adminUsers.decideVerification(id, input, req.admin!.name);
+  await audit(req.admin, `verify:${input.decision}`, 'user', id, u.companyName ?? u.name);
+  ok(res, u);
+});
+
+/* ---------------- Plans & payments (Super Admin) ---------------- */
+
+adminRouter.get('/plans', async (_req, res) => ok(res, await billing.listPlans()));
+
+adminRouter.post('/plans', requireRole('admin'), async (req, res) => {
+  const p = await billing.createPlan(parseBody(planSchema, req));
+  await audit(req.admin, 'create', 'plan', p.id, `${p.name} ₹${p.price}`);
+  created(res, p);
+});
+
+adminRouter.patch('/plans/:id', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const patch = onlySentKeys(parseBody(planUpdateSchema, req), req.body);
+  if (!Object.keys(patch).length) throw badRequest('Nothing to update');
+  const p = await billing.updatePlan(id, patch);
+  await audit(req.admin, 'update', 'plan', id, `${p.name}: ${Object.keys(patch).join(', ')}`);
+  ok(res, p);
+});
+
+adminRouter.get('/payments', requireRole('admin'), async (req, res) => {
+  const { items, meta } = await billing.listPayments(parseQuery(paymentQuerySchema, req));
+  ok(res, items, meta);
+});
+
+adminRouter.get('/payments/summary', requireRole('admin'), async (_req, res) =>
+  ok(res, await billing.paymentSummary()),
+);
+
+adminRouter.post('/payments/manual', requireRole('admin'), async (req, res) => {
+  const p = await billing.recordManualPayment(parseBody(manualPaymentSchema, req), req.admin!.name);
+  await audit(
+    req.admin,
+    'record',
+    'payment',
+    p.id,
+    `₹${p.amount} ${p.plan.name} — ${p.user?.name ?? ''}`,
+  );
+  created(res, p);
+});
+
+adminRouter.post('/payments/:id/refund', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const p = await billing.refundPayment(id, req.admin!.name);
+  await audit(req.admin, 'refund', 'payment', id, `₹${p.amount} ${p.plan.name}`);
+  ok(res, p);
+});
+
 /* ---------------- Website users ---------------- */
 
 adminRouter.get('/users', async (req, res) => {
@@ -321,13 +554,21 @@ adminRouter.get('/users', async (req, res) => {
 
 adminRouter.get('/users/:id', async (req, res) => ok(res, await adminUsers.getUser(parseId(req))));
 
-adminRouter.patch('/users/:id', requireRole('admin'), async (req, res) => {
+adminRouter.patch('/users/:id', requireRole('editor'), async (req, res) => {
   const id = parseId(req);
   const patch = onlySentKeys(parseBody(adminUserUpdateSchema, req), req.body);
   if (!Object.keys(patch).length) throw badRequest('Nothing to update');
   const u = await adminUsers.updateUser(id, patch, req.admin!.name);
   await audit(req.admin, 'update', 'user', id, Object.keys(patch).join(', '));
   ok(res, u);
+});
+
+adminRouter.post('/users/:id/password', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const { password } = parseBody(setUserPasswordSchema, req);
+  const u = await adminUsers.setUserPassword(id, password);
+  await audit(req.admin, 'set-password', 'user', id, u.name);
+  ok(res, { changed: true });
 });
 
 /* ---------------- Locations ---------------- */

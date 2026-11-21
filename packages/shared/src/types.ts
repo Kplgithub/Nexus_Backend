@@ -1,5 +1,10 @@
 import type {
   AdminRole,
+  AlertEvent,
+  PaymentMethod,
+  PaymentStatus,
+  SiteVisitStatus,
+  VerificationStatus,
   BlogCategory,
   BlogStatus,
   Amenity,
@@ -318,6 +323,8 @@ export type Enquiry = {
   status: EnquiryStatus;
   followUpAt: string | null;
   assignedTo: string | null;
+  /** The team member working this lead. */
+  assignedAdmin: { id: string; name: string } | null;
   notes: EnquiryNote[];
   consentAt: string;
   createdAt: string;
@@ -402,6 +409,7 @@ export type ProfileCard = Pick<
 
 export type AdminWebsiteUser = SessionUser & {
   status: UserStatus;
+  verificationStatus: VerificationStatus;
   lastLoginAt: string | null;
   listingCount: number;
   notes: EnquiryNote[];
@@ -414,6 +422,7 @@ export type UserDashboard = {
   enquiriesSent: number;
   listingLimit: number;
   recentLeads: ReceivedLead[];
+  subscription: MySubscription;
 };
 
 export type DashboardStats = {
@@ -656,4 +665,176 @@ export type BlogPostAnalytics = {
   devices: BlogAnalyticsCount[];
   sources: BlogAnalyticsCount[];
   recent: BlogRecentRead[];
+};
+
+/* ---------------- Admin panel ---------------- */
+
+export type AdminRef = { id: string; name: string; role: AdminRole };
+
+export type TeamMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: AdminRole;
+  active: boolean;
+  lastLoginAt: string | null;
+  lockedUntil: string | null;
+  createdAt: string;
+  /** Work in hand, for the Team page. */
+  stats: { openLeads: number; closedLeads: number; upcomingVisits: number; actions30d: number };
+};
+
+export type ActivityItem = {
+  id: string;
+  actor: AdminRef | null;
+  actorEmail: string | null;
+  action: string;
+  entity: string;
+  entityId: string | null;
+  summary: string | null;
+  createdAt: string;
+};
+
+export type Kpi = { value: number; previous: number; spark: number[] };
+
+export type DashboardCharts = {
+  days: number;
+  today: {
+    toReview: number;
+    newLeads: number;
+    followUpsOverdue: number;
+    visitsToday: number;
+    openReports: number;
+    pendingVerification: number;
+  };
+  kpis: { liveListings: Kpi; newLeads: Kpi; closedLeads: Kpi; signups: Kpi };
+  leadsByDay: { date: string; buy: number; rent: number; other: number }[];
+  pipeline: { total: number; contacted: number; visited: number; closed: number };
+  uncontacted24h: number;
+  localities: { slug: string; name: string; leads: number; live: number }[];
+  listingsByType: { type: string; label: string; count: number }[];
+  /** Per team member, open and closed leads in the period. */
+  team: { admin: AdminRef; open: number; closed: number }[];
+  /** Super Admins only; empty for Sub-admins. */
+  activity: ActivityItem[];
+};
+
+export type SiteVisit = {
+  id: string;
+  name: string;
+  phone: string;
+  scheduledAt: string;
+  status: SiteVisitStatus;
+  enquiry: { id: string; leadId: string } | null;
+  property: { id: string; title: string; slug: string } | null;
+  assignedAdmin: AdminRef | null;
+  outcome: string | null;
+  notes: EnquiryNote[];
+  createdBy: string;
+  createdAt: string;
+};
+
+export type VerificationItem = AdminWebsiteUser & {
+  verificationStatus: VerificationStatus;
+  verifiedAt: string | null;
+  verifiedBy: string | null;
+  verificationNote: string | null;
+};
+
+export type FeaturedListing = {
+  id: string;
+  title: string;
+  slug: string;
+  status: PropertyStatus;
+  listingType: ListingType;
+  localityName: string;
+  price: number;
+  featuredUntil: string | null;
+  postedBy: { id: string; name: string } | null;
+};
+
+export type Plan = {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  durationDays: number;
+  listingLimit: number;
+  featuredListings: number;
+  roles: UserRole[];
+  active: boolean;
+  sortOrder: number;
+};
+
+export type Payment = {
+  id: string;
+  user: { id: string; name: string; role: UserRole; phone: string } | null;
+  plan: {
+    id: string;
+    name: string;
+    durationDays: number;
+    listingLimit: number;
+    featuredListings: number;
+  };
+  amount: number;
+  status: PaymentStatus;
+  method: PaymentMethod;
+  orderId: string | null;
+  paymentId: string | null;
+  reference: string | null;
+  note: string | null;
+  recordedBy: string | null;
+  paidAt: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdAt: string;
+};
+
+export type PaymentSummary = {
+  thisMonth: number;
+  lastMonth: number;
+  activeSubscriptions: number;
+  onlineEnabled: boolean;
+};
+
+export type MySubscription = {
+  plan: Payment['plan'];
+  startsAt: string;
+  endsAt: string;
+} | null;
+
+export type CheckoutOrder = {
+  orderId: string;
+  keyId: string;
+  amount: number;
+  currency: 'INR';
+  planName: string;
+  prefill: { name: string; email: string; contact: string };
+};
+
+export type AdminNotification = {
+  id: string;
+  kind: AlertEvent | 'assigned' | 'system';
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
+};
+
+export type AlertSettings = {
+  emails: string[];
+  whatsappNumbers: string[];
+  events: Record<AlertEvent, boolean>;
+};
+
+export type AlertChannels = { email: boolean; whatsapp: boolean };
+
+export type AdminBadges = {
+  review: number;
+  projects: number;
+  leads: number;
+  reports: number;
+  verification: number;
+  unread: number;
 };

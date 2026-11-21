@@ -1,6 +1,5 @@
 import { Types } from 'mongoose';
 import {
-  LISTING_LIMITS,
   PROPERTY_STATUSES,
   type DashboardStats,
   type PropertyStatus,
@@ -11,6 +10,7 @@ import { Property } from '../models/property.model.js';
 import { Enquiry } from '../models/misc.models.js';
 import { User } from '../models/user.model.js';
 import { listLeadsForOwner } from './enquiry.service.js';
+import { activeSubscription, listingLimitFor } from './billing.service.js';
 
 export async function getDashboard(): Promise<DashboardStats> {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -126,7 +126,8 @@ export async function getUserDashboard(userId: string, role: UserRole): Promise<
     leads: { total: leadsTotal, unseen: leadsUnseen },
     saved: user?.saved?.length ?? 0,
     enquiriesSent: sent,
-    listingLimit: LISTING_LIMITS[role],
+    listingLimit: await listingLimitFor(userId, role),
     recentLeads: recent.items,
+    subscription: await activeSubscription(userId),
   };
 }

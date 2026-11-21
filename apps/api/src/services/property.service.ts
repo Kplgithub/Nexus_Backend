@@ -1,7 +1,6 @@
 import type { FilterQuery, SortOrder } from 'mongoose';
 import { Types } from 'mongoose';
 import {
-  LISTING_LIMITS,
   PUBLIC_DETAIL_STATUSES,
   propertyValidateMerged,
   pricePerSqft,
@@ -26,6 +25,8 @@ import {
 import type { z } from 'zod';
 import type { adminPropertyQuerySchema } from '@nexus/shared';
 import { Property, type PropertyAttrs } from '../models/property.model.js';
+import { listingLimitFor } from './billing.service.js';
+import { businessAlert } from './notification.service.js';
 import { Project } from '../models/project.model.js';
 import { Enquiry, SlugRedirect } from '../models/misc.models.js';
 import { User } from '../models/user.model.js';
@@ -586,6 +587,7 @@ function statusSideEffects(current: Partial<Lean>, next: PropertyStatus) {
   if (next === 'rented' || next === 'sold') out.closedAt = new Date();
   if (next === 'archived' || next === 'inactive' || next === 'rejected' || next === 'pending') {
     out.featured = false;
+    out.featuredUntil = null;
   }
   return out;
 }
@@ -829,18 +831,30 @@ async function ownedDoc(userId: string, id: string) {
 }
 
 async function assertUnderLimit(userId: string, role: UserRole, excludeId?: Types.ObjectId) {
-  const active = await Property.countDocuments({
-    postedBy: userId,
-    status: { $in: ACTIVE_FOR_LIMIT },
-    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
-  });
-  if (active >= LISTING_LIMITS[role]) {
+  const [active, limit] = await Promise.all([
+    Property.countDocuments({
+      postedBy: userId,
+      status: { $in: ACTIVE_FOR_LIMIT },
+      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    }),
+    listingLimitFor(userId, role),
+  ]);
+  if (active >= limit) {
     throw new AppError(
       403,
       'LISTING_LIMIT',
-      `You can have up to ${LISTING_LIMITS[role]} live or in-review listings. Mark some as rented, sold or inactive first.`,
+      `You can have up to ${limit} live or in-review listings. Mark some as rented, sold or inactive first, or take a paid plan for more.`,
     );
   }
+}
+
+/** Tells the team a listing is waiting in the review queue. */
+function reviewAlert(doc: { _id: unknown; title: string; status: string }) {
+  if (doc.status !== 'pending') return;
+  void businessAlert('listing', {
+    title: `Listing waiting for review: ${doc.title}`,
+    link: '/admin/review',
+  });
 }
 
 export async function listMine(userId: string, status?: PropertyStatus) {
@@ -878,6 +892,7 @@ export async function createMine(
     createdBy: user.id,
     updatedBy: user.id,
   });
+  reviewAlert(doc);
   return getMine(user.id, String(doc._id));
 }
 
@@ -909,6 +924,7 @@ export async function updateMine(
   if (wasLive || next.status === 'pending') {
     doc.moderationNote = undefined;
     await doc.save();
+    reviewAlert(doc);
   }
   return getMine(user.id, id);
 }
@@ -935,6 +951,7 @@ export async function setMyStatus(
   }
   if (status === 'pending') await assertUnderLimit(user.id, user.role, doc._id);
   await applyUpdate(doc, { status } as PropertyUpdate, user.id);
+  reviewAlert(doc);
   return getMine(user.id, id);
 }
 
