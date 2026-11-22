@@ -15,6 +15,9 @@ import {
   AREA_UNITS,
   CATEGORIES,
   ENQUIRY_STATUSES,
+  LOAN_EMPLOYMENT,
+  LOAN_PURPOSES,
+  LOAN_STAGES,
   FAQ_CATEGORIES,
   LISTING_TYPES,
   OTP_LENGTH,
@@ -487,28 +490,46 @@ export const adminPropertyQuerySchema = z.object({
 /** Honeypot: real users never see this field; any value marks the request as spam. */
 const honeypot = z.string().max(200).optional();
 
-export const enquiryCreateSchema = z.object({
-  type: z.enum(ENQUIRY_TYPES).default('general'),
-  name: plainText(2, 80),
-  phone: z.string().trim().min(8).max(25),
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .max(120)
-    .email('Enter a valid email')
-    .optional()
-    .or(z.literal('').transform(() => undefined)),
-  message: plainText(0, 2000).default(''),
-  propertyId: objectIdSchema.optional(),
-  projectId: objectIdSchema.optional(),
-  sourcePage: z.string().trim().max(300).optional(),
-  preferredContactTime: plainText(0, 60).optional(),
-  consent: z.literal(true, { error: 'Please agree to be contacted' }),
-  website: honeypot,
-  /** Milliseconds the form was open; very fast submissions are treated as bots. */
-  elapsedMs: z.number().int().min(0).max(86_400_000).optional(),
+/** Extra details sent with a home loan enquiry. */
+export const loanDetailsSchema = z.object({
+  amount: z.coerce.number().int().min(100_000, 'Enter at least ₹1 Lakh').max(500_000_000),
+  monthlyIncome: z.coerce.number().int().min(0).max(100_000_000).optional(),
+  employment: z.enum(LOAN_EMPLOYMENT),
+  purpose: z.enum(LOAN_PURPOSES),
+  /** Lender whose offer the visitor clicked in the rates table. */
+  lender: plainText(0, 80).optional(),
 });
+export type LoanDetailsInput = z.input<typeof loanDetailsSchema>;
+
+export const enquiryCreateSchema = z
+  .object({
+    type: z.enum(ENQUIRY_TYPES).default('general'),
+    name: plainText(2, 80),
+    phone: z.string().trim().min(8).max(25),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(120)
+      .email('Enter a valid email')
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+    message: plainText(0, 2000).default(''),
+    propertyId: objectIdSchema.optional(),
+    projectId: objectIdSchema.optional(),
+    sourcePage: z.string().trim().max(300).optional(),
+    preferredContactTime: plainText(0, 60).optional(),
+    consent: z.literal(true, { error: 'Please agree to be contacted' }),
+    website: honeypot,
+    /** Milliseconds the form was open; very fast submissions are treated as bots. */
+    elapsedMs: z.number().int().min(0).max(86_400_000).optional(),
+    /** Required for home loan enquiries, ignored otherwise. */
+    loan: loanDetailsSchema.optional(),
+  })
+  .refine((v) => v.type !== 'home-loan' || v.loan, {
+    path: ['loan'],
+    message: 'Loan details are required',
+  });
 export type EnquiryCreateInput = z.input<typeof enquiryCreateSchema>;
 
 export const enquiryUpdateSchema = z
@@ -517,6 +538,10 @@ export const enquiryUpdateSchema = z
     followUpAt: z.coerce.date().nullable().optional(),
     assignedTo: plainText(0, 80).optional(),
     note: plainText(1, 2000).optional(),
+    /** Home loan leads only. */
+    loanStage: z.enum(LOAN_STAGES).optional(),
+    /** Bank the lead was passed to ('' clears it). */
+    loanBank: plainText(0, 80).optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
@@ -799,6 +824,41 @@ export const homeBannerSchema = z.object({
 });
 export type HomeBannerInput = z.input<typeof homeBannerSchema>;
 
+/** One row of the public home loan rates table. Rates are typed in by the team. */
+export const loanLenderSchema = z.object({
+  name: plainText(2, 80),
+  kind: z.enum(['bank', 'hfc']).default('bank'),
+  /** Starting rate, % a year. */
+  rateFrom: z.coerce.number().min(1).max(30),
+  maxTenureYears: z.coerce.number().int().min(1).max(40).default(30),
+  processingFee: plainText(0, 60).default(''),
+  active: z.boolean().default(true),
+});
+export type LoanLender = z.output<typeof loanLenderSchema>;
+
+export const DEFAULT_HOME_LOAN = {
+  /** Master switch: off hides the loan page, links, buttons and leads form everywhere. */
+  enabled: false,
+  lenders: [] as LoanLender[],
+  ratesCheckedAt: null as string | null,
+  exampleRate: 8.5,
+};
+
+export const homeLoanSettingsSchema = z.object({
+  /** Master switch for the whole home loan feature on the public site. */
+  enabled: z.boolean().default(false),
+  lenders: z.array(loanLenderSchema).max(20).default([]),
+  /** When someone last checked the rates against the banks' own websites (ISO date). */
+  ratesCheckedAt: z
+    .string()
+    .datetime({ offset: true })
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+  /** Rate the calculators start at, % a year. */
+  exampleRate: z.coerce.number().min(1).max(30).default(8.5),
+});
+
 export const siteSettingsSchema = z.object({
   businessName: plainText(2, 80),
   tagline: plainText(0, 80),
@@ -867,6 +927,7 @@ export const siteSettingsSchema = z.object({
     .max(120)
     .optional()
     .or(z.literal('').transform(() => undefined)),
+  homeLoan: homeLoanSettingsSchema.default(DEFAULT_HOME_LOAN),
 });
 export type SiteSettingsInput = z.input<typeof siteSettingsSchema>;
 export const siteSettingsUpdateSchema = siteSettingsSchema.partial();

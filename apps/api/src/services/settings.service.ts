@@ -1,4 +1,4 @@
-import { siteSettingsSchema, type SiteSettings } from '@nexus/shared';
+import { DEFAULT_HOME_LOAN, siteSettingsSchema, type SiteSettings } from '@nexus/shared';
 import { SiteSettings as SiteSettingsModel } from '../models/misc.models.js';
 
 /** Defaults hold only facts the business supplied. Everything else stays empty until approved. */
@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   allowInternationalEnquiries: false,
   featurePrices: { days7: 49, days30: 99 },
   enquiryNotificationEmail: undefined,
+  homeLoan: { ...DEFAULT_HOME_LOAN, lenders: [] },
 };
 
 let cache: { value: SiteSettings; at: number } | null = null;
@@ -36,6 +37,9 @@ export async function getSettings(): Promise<SiteSettings> {
   merged.home = { ...DEFAULT_SETTINGS.home, ...(merged.home ?? {}) };
   merged.home.banners ??= [];
   merged.featurePrices = { ...DEFAULT_SETTINGS.featurePrices, ...(merged.featurePrices ?? {}) };
+  merged.homeLoan = { ...DEFAULT_SETTINGS.homeLoan, ...(merged.homeLoan ?? {}) };
+  merged.homeLoan.lenders ??= [];
+  merged.homeLoan.ratesCheckedAt ??= null;
   cache = { value: merged, at: Date.now() };
   return merged;
 }
@@ -81,6 +85,7 @@ export async function updateSettings(patch: Partial<SiteSettings>): Promise<Site
     address: { ...current.address, ...(patch.address ?? {}) },
     social: patch.social ?? current.social,
     featurePrices: { ...current.featurePrices, ...(patch.featurePrices ?? {}) },
+    homeLoan: { ...current.homeLoan, ...(patch.homeLoan ?? {}) },
   });
   await SiteSettingsModel.updateOne({ key: 'site' }, { $set: { data: next } }, { upsert: true });
   cache = null;

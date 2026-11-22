@@ -267,8 +267,35 @@ export const ENQUIRY_STATUSES = ['new', 'contacted', 'qualified', 'closed', 'spa
 export type EnquiryStatus = (typeof ENQUIRY_STATUSES)[number];
 
 /** "contact" = a signed-in user revealed the poster's phone number. */
-export const ENQUIRY_TYPES = ['property', 'general', 'callback', 'contact'] as const;
+export const ENQUIRY_TYPES = ['property', 'general', 'callback', 'contact', 'home-loan'] as const;
 export type EnquiryType = (typeof ENQUIRY_TYPES)[number];
+
+/* Home loan leads. NEXUS is not a lender: leads are collected and passed on to a bank by the team. */
+export const LOAN_EMPLOYMENT = ['salaried', 'self-employed', 'business'] as const;
+export type LoanEmployment = (typeof LOAN_EMPLOYMENT)[number];
+export const LOAN_EMPLOYMENT_LABELS: Record<LoanEmployment, string> = {
+  salaried: 'Salaried',
+  'self-employed': 'Self-employed',
+  business: 'Business',
+};
+export const LOAN_PURPOSES = ['found', 'looking', 'transfer'] as const;
+export type LoanPurpose = (typeof LOAN_PURPOSES)[number];
+export const LOAN_PURPOSE_LABELS: Record<LoanPurpose, string> = {
+  found: 'Property found',
+  looking: 'Still looking',
+  transfer: 'Balance transfer',
+};
+export const LOAN_STAGES = ['new', 'called', 'sent-to-bank', 'sanctioned', 'not-eligible'] as const;
+export type LoanStage = (typeof LOAN_STAGES)[number];
+export const LOAN_STAGE_LABELS: Record<LoanStage, string> = {
+  new: 'New',
+  called: 'Called',
+  'sent-to-bank': 'Sent to bank',
+  sanctioned: 'Sanctioned',
+  'not-eligible': 'Not eligible',
+};
+/** Days after which the published loan rates count as out of date. */
+export const LOAN_RATES_STALE_DAYS = 30;
 
 export const SORT_OPTIONS = ['newest', 'price_asc', 'price_desc', 'area_desc'] as const;
 export type SortOption = (typeof SORT_OPTIONS)[number];

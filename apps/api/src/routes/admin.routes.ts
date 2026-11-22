@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Router, type Router as RouterType } from 'express';
 import multer from 'multer';
+import { refreshWebsite } from '../lib/web-revalidate.js';
 import {
   IMAGE_MAX_BYTES,
   adminEnquiryQuerySchema,
@@ -734,7 +735,15 @@ adminRouter.get('/settings', async (_req, res) => ok(res, await getSettings()));
 
 adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
   const patch = onlySentKeys(parseBody(siteSettingsUpdateSchema, req), req.body);
+  // Keep home loan fields that were not sent (e.g. the on/off switch alone keeps the rates).
+  if (patch.homeLoan)
+    patch.homeLoan = onlySentKeys(
+      patch.homeLoan,
+      (req.body as { homeLoan?: unknown }).homeLoan,
+    ) as typeof patch.homeLoan;
   const s = await updateSettings(patch);
+  // The home loan switch and site details show on every page: refresh the website now.
+  refreshWebsite('settings');
   await audit(req.admin, 'update', 'settings', undefined, Object.keys(patch).join(', '));
   ok(res, s);
 });

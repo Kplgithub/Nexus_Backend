@@ -11,6 +11,13 @@ import {
   type enquiryCreateSchema,
   type enquiryUpdateSchema,
   isBusinessRole,
+  formatINRShort,
+  LOAN_EMPLOYMENT_LABELS,
+  LOAN_PURPOSE_LABELS,
+  LOAN_STAGE_LABELS,
+  type LoanEmployment,
+  type LoanPurpose,
+  type LoanStage,
   type UserRole,
 } from '@nexus/shared';
 import { Admin, Enquiry } from '../models/misc.models.js';
@@ -69,7 +76,31 @@ type EnquiryLean = {
   listingOwner?: Types.ObjectId | { _id: Types.ObjectId; name: string } | null;
   seenByOwner?: boolean;
   lockedForOwner?: boolean;
+  loan?: {
+    amount: number;
+    monthlyIncome?: number | null;
+    employment: LoanEmployment;
+    purpose: LoanPurpose;
+    lender?: string | null;
+    stage: LoanStage;
+    bank?: string | null;
+    sentToBankAt?: Date | null;
+  } | null;
 };
+
+function loanOf(e: EnquiryLean): EnquiryDto['loan'] {
+  if (!e.loan) return null;
+  return {
+    amount: e.loan.amount,
+    monthlyIncome: e.loan.monthlyIncome ?? null,
+    employment: e.loan.employment,
+    purpose: e.loan.purpose,
+    lender: e.loan.lender ?? null,
+    stage: e.loan.stage,
+    bank: e.loan.bank ?? null,
+    sentToBankAt: e.loan.sentToBankAt ? e.loan.sentToBankAt.toISOString() : null,
+  };
+}
 
 function adminRefOf(a: EnquiryLean['assignedAdmin']): EnquiryDto['assignedAdmin'] {
   if (!a) return null;
@@ -131,6 +162,7 @@ function toDto(e: EnquiryLean): EnquiryDto {
     updatedAt: e.updatedAt.toISOString(),
     userId: e.user ? String(e.user) : null,
     listingOwner: ownerRef(e.listingOwner),
+    loan: loanOf(e),
   };
 }
 
@@ -185,7 +217,12 @@ export async function createEnquiry(
       .select('name slug builder')
       .lean();
   }
-  const owner = property?.postedBy ?? project?.builder ?? null;
+  // A home loan lead belongs to NEXUS, never to the listing's owner.
+  const isLoan = input.type === 'home-loan' && !!input.loan;
+  if (isLoan && !(await getSettings()).homeLoan.enabled) {
+    throw new AppError(403, 'LOAN_OFF', 'Home loan help is not available right now');
+  }
+  const owner = isLoan ? null : (property?.postedBy ?? project?.builder ?? null);
   if (user && owner && String(owner) === user.id) {
     throw badRequest('This is your own listing');
   }
@@ -193,6 +230,7 @@ export async function createEnquiry(
   // The same person enquiring twice about the same thing within minutes: keep one lead.
   const recent = await Enquiry.findOne({
     phone,
+    ...(isLoan ? { type: 'home-loan' } : { type: { $ne: 'home-loan' } }),
     property: property?._id ?? null,
     project: project?._id ?? null,
     createdAt: { $gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
@@ -203,10 +241,10 @@ export async function createEnquiry(
 
   const spam = looksAutomated(input);
   const locked = !spam && owner ? await shouldLockLead(owner) : false;
-  const leadId = await nextLeadId('E');
+  const leadId = await nextLeadId(isLoan ? 'H' : 'E');
   await Enquiry.create({
     leadId,
-    type: property || project ? 'property' : input.type,
+    type: isLoan ? 'home-loan' : property || project ? 'property' : input.type,
     name: input.name,
     phone,
     email: input.email ?? null,
@@ -226,7 +264,46 @@ export async function createEnquiry(
     user: user?.id ?? null,
     listingOwner: owner,
     lockedForOwner: locked,
+    loan: isLoan
+      ? {
+          amount: input.loan!.amount,
+          monthlyIncome: input.loan!.monthlyIncome ?? null,
+          employment: input.loan!.employment,
+          purpose: input.loan!.purpose,
+          lender: input.loan!.lender || null,
+          stage: 'new',
+        }
+      : null,
   });
+
+  if (isLoan) {
+    if (!spam) {
+      const l = input.loan!;
+      void businessAlert(
+        'lead',
+        {
+          title: `Home loan enquiry from ${input.name}`,
+          body: `${formatINRShort(l.amount)} · ${LOAN_EMPLOYMENT_LABELS[l.employment]} (${leadId})`,
+          link: '/admin/enquiries?type=home-loan',
+        },
+        { skipEmail: true },
+      );
+      void sendLeadEmail(`New home loan enquiry ${leadId}`, {
+        'Lead ID': leadId,
+        Name: input.name,
+        Phone: phone,
+        Email: input.email,
+        'Loan amount': formatINRShort(l.amount),
+        'Monthly income': l.monthlyIncome ? formatINRShort(l.monthlyIncome) : undefined,
+        Work: LOAN_EMPLOYMENT_LABELS[l.employment],
+        Need: LOAN_PURPOSE_LABELS[l.purpose],
+        'Offer clicked': l.lender,
+        Property: property?.title,
+        Message: input.message,
+      });
+    }
+    return { leadId, duplicate: false };
+  }
 
   if (!spam && property?.postedBy) {
     void notifyListingOwner(property, input.name, phone, input.message, locked);
@@ -387,6 +464,26 @@ export async function updateEnquiry(
   if (patch.followUpAt !== undefined) e.followUpAt = patch.followUpAt;
   if (patch.assignedTo !== undefined) e.assignedTo = patch.assignedTo || null;
   if (patch.note) e.notes.push({ text: patch.note, by, at: new Date() });
+  if (patch.loanStage !== undefined || patch.loanBank !== undefined) {
+    if (!e.loan) throw badRequest('This is not a home loan lead');
+    if (patch.loanBank !== undefined) e.loan.bank = patch.loanBank.trim() || null;
+    if (patch.loanStage && patch.loanStage !== e.loan.stage) {
+      e.loan.stage = patch.loanStage;
+      if (patch.loanStage === 'sent-to-bank') {
+        if (!e.loan.bank)
+          throw badRequest('Write the bank name first', { loanBank: ['Which bank?'] });
+        e.loan.sentToBankAt = new Date();
+      }
+      if (patch.loanStage !== 'new' && !e.contactedAt) e.contactedAt = new Date();
+      e.notes.push({
+        text: `Loan stage: ${LOAN_STAGE_LABELS[patch.loanStage]}${
+          patch.loanStage === 'sent-to-bank' && e.loan.bank ? ` (${e.loan.bank})` : ''
+        }`,
+        by,
+        at: new Date(),
+      });
+    }
+  }
   await e.save();
   return getEnquiry(id);
 }
@@ -453,6 +550,11 @@ export async function exportEnquiriesCsv(
       'Follow-up',
       'Assigned to',
       'Latest note',
+      'Loan amount',
+      'Monthly income',
+      'Work',
+      'Loan stage',
+      'Bank',
     ],
     rows.map((e) => [
       e.leadId,
@@ -467,6 +569,11 @@ export async function exportEnquiriesCsv(
       e.followUpAt?.toISOString(),
       e.assignedTo,
       e.notes.at(-1)?.text,
+      e.loan?.amount,
+      e.loan?.monthlyIncome,
+      e.loan ? LOAN_EMPLOYMENT_LABELS[e.loan.employment] : undefined,
+      e.loan ? LOAN_STAGE_LABELS[e.loan.stage] : undefined,
+      e.loan?.bank,
     ]),
   );
 }
