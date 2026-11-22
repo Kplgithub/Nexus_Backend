@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   },
   allowInternationalEnquiries: false,
   featurePrices: { days7: 49, days30: 99 },
+  invoice: { legalName: '', address: '', state: 'Rajasthan', sacCode: '' },
   enquiryNotificationEmail: undefined,
 };
 
@@ -36,15 +37,18 @@ export async function getSettings(): Promise<SiteSettings> {
   merged.home = { ...DEFAULT_SETTINGS.home, ...(merged.home ?? {}) };
   merged.home.banners ??= [];
   merged.featurePrices = { ...DEFAULT_SETTINGS.featurePrices, ...(merged.featurePrices ?? {}) };
+  merged.invoice = { ...DEFAULT_SETTINGS.invoice, ...(merged.invoice ?? {}) };
   cache = { value: merged, at: Date.now() };
   return merged;
 }
 
 /** Public projection — strips admin-only fields and hides the address unless enabled. */
-export async function getPublicSettings(): Promise<Omit<SiteSettings, 'enquiryNotificationEmail'>> {
+export async function getPublicSettings(): Promise<
+  Omit<SiteSettings, 'enquiryNotificationEmail' | 'invoice'>
+> {
   const s = await getSettings();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { enquiryNotificationEmail: _hidden, ...rest } = s;
+  const { enquiryNotificationEmail: _hidden, invoice: _invoice, ...rest } = s;
   return s.showAddress
     ? rest
     : {
@@ -81,6 +85,7 @@ export async function updateSettings(patch: Partial<SiteSettings>): Promise<Site
     address: { ...current.address, ...(patch.address ?? {}) },
     social: patch.social ?? current.social,
     featurePrices: { ...current.featurePrices, ...(patch.featurePrices ?? {}) },
+    invoice: { ...current.invoice, ...(patch.invoice ?? {}) },
   });
   await SiteSettingsModel.updateOne({ key: 'site' }, { $set: { data: next } }, { upsert: true });
   cache = null;

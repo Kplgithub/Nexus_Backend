@@ -106,6 +106,8 @@ const paymentSchema = new Schema(
     paidAt: { type: Date, default: null },
     startsAt: { type: Date, default: null },
     endsAt: { type: Date, default: null },
+    /** Invoice number given when the payment is paid, e.g. NX/2026-27/0001. */
+    invoiceNo: { type: String, default: null },
     /** Set once the "your plan ends soon" reminder went out. */
     reminderSentAt: { type: Date, default: null },
   },
@@ -117,6 +119,10 @@ paymentSchema.index({ status: 1, createdAt: -1 });
 paymentSchema.index(
   { orderId: 1 },
   { unique: true, partialFilterExpression: { orderId: { $type: 'string' } } },
+);
+paymentSchema.index(
+  { invoiceNo: 1 },
+  { unique: true, partialFilterExpression: { invoiceNo: { $type: 'string' } } },
 );
 export const Payment = model('Payment', paymentSchema);
 

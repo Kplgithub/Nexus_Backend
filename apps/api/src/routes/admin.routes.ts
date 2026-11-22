@@ -591,6 +591,10 @@ adminRouter.post('/payments/manual-feature', requireRole('admin'), async (req, r
   created(res, p);
 });
 
+adminRouter.get('/payments/:id/invoice', requireRole('admin'), async (req, res) =>
+  ok(res, await billing.paymentInvoice(parseId(req))),
+);
+
 adminRouter.post('/payments/:id/refund', requireRole('admin'), async (req, res) => {
   const id = parseId(req);
   const p = await billing.refundPayment(id, req.admin!.name);
