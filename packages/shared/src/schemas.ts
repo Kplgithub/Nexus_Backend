@@ -799,6 +799,9 @@ export const homeBannerSchema = z.object({
 });
 export type HomeBannerInput = z.input<typeof homeBannerSchema>;
 
+/** Indian GST number: 2 digit state code, PAN, entity number, Z, check digit. */
+export const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
 export const siteSettingsSchema = z.object({
   businessName: plainText(2, 80),
   tagline: plainText(0, 80),
@@ -859,6 +862,26 @@ export const siteSettingsSchema = z.object({
       days30: z.coerce.number().int().min(1).max(100000),
     })
     .default({ days7: 49, days30: 99 }),
+  /** Business details printed on payment invoices. With a GSTIN the invoice shows GST. */
+  invoice: z
+    .object({
+      legalName: plainText(0, 120).default(''),
+      gstin: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(GSTIN_RE, 'Enter a valid 15 character GSTIN')
+        .optional()
+        .or(z.literal('').transform(() => undefined)),
+      address: plainText(0, 300).default(''),
+      state: plainText(0, 60).default('Rajasthan'),
+      sacCode: z
+        .string()
+        .trim()
+        .regex(/^\d{0,8}$/, 'SAC code is numbers only')
+        .default(''),
+    })
+    .default({ legalName: '', address: '', state: 'Rajasthan', sacCode: '' }),
   enquiryNotificationEmail: z
     .string()
     .trim()
