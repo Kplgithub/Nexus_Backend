@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { env } from '../config/env.js';
 import { parseBody, parseId, parseQuery } from '../middleware/validate.js';
 import { limiters } from '../middleware/security.js';
-import { created, ok } from '../lib/respond.js';
+import { created, ok, paginate } from '../lib/respond.js';
 import { notFound } from '../lib/errors.js';
 import { hashIp } from '../lib/crypto.js';
 import { optionalUser } from '../middleware/user-auth.js';
@@ -32,7 +32,7 @@ import * as reports from '../services/report.service.js';
 import * as leads from '../services/enquiry.service.js';
 import * as blog from '../services/blog.service.js';
 import * as blogAnalytics from '../services/blog-analytics.service.js';
-import { getPublicSettings } from '../services/settings.service.js';
+import { getPublicSettings, projectsOn } from '../services/settings.service.js';
 import {
   smartSearch,
   smartSearchQuerySchema,
@@ -69,6 +69,8 @@ publicRouter.get('/properties/:slug', async (req, res) => {
     // The web app turns this into a permanent (308) redirect for crawlers.
     return ok(res, { redirectTo: result.slug });
   }
+  // Its site section is switched off: the web app redirects or shows 404 (admin's choice).
+  if (result.kind === 'off') return ok(res, { sectionOff: result.section });
   ok(res, { property: result.property, similar: result.similar });
 });
 
@@ -85,22 +87,31 @@ publicRouter.get('/home', async (req, res) => {
   cache(res);
   const [sections, newProjects] = await Promise.all([
     properties.listHomeSections(city),
-    projects.searchProjects({ page: 1, limit: 6, ...(city ? { city } : {}) }),
+    (await projectsOn())
+      ? projects.searchProjects({ page: 1, limit: 6, ...(city ? { city } : {}) })
+      : { items: [] },
   ]);
   ok(res, { ...sections, projects: newProjects.items });
 });
 
 /* ---------------- New projects ---------------- */
 
+/** New projects switched off in Admin → Settings → Site sections: no project data goes out. */
+async function requireProjects() {
+  if (!(await projectsOn())) throw notFound('Project not found');
+}
+
 publicRouter.get('/projects', async (req, res) => {
-  const { items, meta } = await projects.searchProjects(parseQuery(projectSearchSchema, req));
+  const q = parseQuery(projectSearchSchema, req);
+  if (!(await projectsOn())) return ok(res, [], paginate(q.page, q.limit, 0));
+  const { items, meta } = await projects.searchProjects(q);
   cache(res);
   ok(res, items, meta);
 });
 
 publicRouter.get('/projects/options', async (req, res) => {
   const city = String(req.query.city ?? '').toLowerCase();
-  if (!SLUG_PATTERN.test(city)) return ok(res, []);
+  if (!SLUG_PATTERN.test(city) || !(await projectsOn())) return ok(res, []);
   cache(res);
   ok(res, await projects.projectOptions(city));
 });
@@ -108,6 +119,7 @@ publicRouter.get('/projects/options', async (req, res) => {
 publicRouter.get('/projects/:slug', async (req, res) => {
   const slug = String(req.params.slug).toLowerCase();
   if (!SLUG_PATTERN.test(slug) || slug.length > 100) throw notFound('Project not found');
+  await requireProjects();
   cache(res);
   ok(res, await projects.getPublicProject(slug));
 });
@@ -120,7 +132,7 @@ publicRouter.post('/projects/:id/view', limiters.view, async (req, res) => {
 
 publicRouter.get('/sitemap/projects', async (_req, res) => {
   cache(res, 300);
-  ok(res, await projects.sitemapProjects());
+  ok(res, (await projectsOn()) ? await projects.sitemapProjects() : []);
 });
 
 /* ---------------- Agents and builders ---------------- */

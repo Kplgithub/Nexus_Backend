@@ -1,5 +1,16 @@
-import { DEFAULT_HOME_LOAN, siteSettingsSchema, type SiteSettings } from '@nexus/shared';
+import {
+  DEFAULT_FARMS,
+  DEFAULT_HOME_LOAN,
+  DEFAULT_SITE_SECTIONS,
+  farmOn,
+  hiddenListingConditions,
+  siteSettingsSchema,
+  type SiteSection,
+  type SiteSettings,
+} from '@nexus/shared';
 import { SiteSettings as SiteSettingsModel } from '../models/misc.models.js';
+import { Property } from '../models/property.model.js';
+import { Project } from '../models/project.model.js';
 
 /** Defaults hold only facts the business supplied. Everything else stays empty until approved. */
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -26,6 +37,9 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   invoice: { legalName: '', address: '', state: 'Rajasthan', sacCode: '' },
   enquiryNotificationEmail: undefined,
   homeLoan: { ...DEFAULT_HOME_LOAN, lenders: [] },
+  farms: { ...DEFAULT_FARMS },
+  sections: { ...DEFAULT_SITE_SECTIONS },
+  sectionOffAction: 'redirect',
 };
 
 let cache: { value: SiteSettings; at: number } | null = null;
@@ -41,7 +55,10 @@ export async function getSettings(): Promise<SiteSettings> {
   merged.homeLoan = { ...DEFAULT_SETTINGS.homeLoan, ...(merged.homeLoan ?? {}) };
   merged.homeLoan.lenders ??= [];
   merged.homeLoan.ratesCheckedAt ??= null;
+  merged.farms = { ...DEFAULT_SETTINGS.farms, ...(merged.farms ?? {}) };
   merged.invoice = { ...DEFAULT_SETTINGS.invoice, ...(merged.invoice ?? {}) };
+  merged.sections = { ...DEFAULT_SITE_SECTIONS, ...(merged.sections ?? {}) };
+  merged.sectionOffAction ??= 'redirect';
   cache = { value: merged, at: Date.now() };
   return merged;
 }
@@ -90,13 +107,56 @@ export async function updateSettings(patch: Partial<SiteSettings>): Promise<Site
     social: patch.social ?? current.social,
     featurePrices: { ...current.featurePrices, ...(patch.featurePrices ?? {}) },
     homeLoan: { ...current.homeLoan, ...(patch.homeLoan ?? {}) },
+    farms: { ...current.farms, ...(patch.farms ?? {}) },
     invoice: { ...current.invoice, ...(patch.invoice ?? {}) },
+    sections: { ...current.sections, ...(patch.sections ?? {}) },
   });
   await SiteSettingsModel.updateOne({ key: 'site' }, { $set: { data: next } }, { upsert: true });
   cache = null;
   return next as SiteSettings;
 }
 
+/** True when admin has switched farm listings off: hide them from every public list and page. */
+export async function farmListingsHidden(): Promise<boolean> {
+  return !farmOn((await getSettings()).farms, 'listings');
+}
+
+/** True when admin has switched off posting new farm listings. */
+export async function farmPostingOff(): Promise<boolean> {
+  return !farmOn((await getSettings()).farms, 'postProperty');
+}
+
 export function clearSettingsCache() {
   cache = null;
+}
+
+/**
+ * Extra filter that hides listings of switched-off site sections (Admin → Settings →
+ * Site sections). Spread it into every public listing query. Empty when all are on.
+ */
+export async function sectionListingFilter(): Promise<{ $nor?: Record<string, string>[] }> {
+  const hidden = hiddenListingConditions((await getSettings()).sections);
+  return hidden.length ? { $nor: hidden } : {};
+}
+
+/** Whether the New projects section is on. */
+export async function projectsOn(): Promise<boolean> {
+  return (await getSettings()).sections.projects !== false;
+}
+
+/**
+ * Live (published) listings and projects in each site section, for the admin switch panel:
+ * how much a switch hides. Counted whether the section is on or off.
+ */
+export async function sectionCounts(): Promise<Record<SiteSection, number>> {
+  const live = { status: 'published' };
+  const [buy, rent, pg, plot, commercial, projects] = await Promise.all([
+    Property.countDocuments({ ...live, category: 'residential', listingType: 'sale' }),
+    Property.countDocuments({ ...live, category: 'residential', listingType: 'rent' }),
+    Property.countDocuments({ ...live, propertyType: 'pg' }),
+    Property.countDocuments({ ...live, propertyType: 'plot' }),
+    Property.countDocuments({ ...live, category: 'commercial' }),
+    Project.countDocuments({ status: 'published' }),
+  ]);
+  return { buy, rent, projects, pg, plot, commercial };
 }

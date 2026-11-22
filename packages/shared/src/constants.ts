@@ -10,7 +10,17 @@ export type Category = (typeof CATEGORIES)[number];
 export const ACTIVE_CATEGORIES: readonly Category[] = ['residential', 'commercial'];
 
 export const PROPERTY_TYPES = {
-  residential: ['apartment', 'independent-house', 'builder-floor', 'villa', 'studio', 'pg', 'plot'],
+  residential: [
+    'apartment',
+    'independent-house',
+    'builder-floor',
+    'villa',
+    'studio',
+    'pg',
+    'plot',
+    'farmhouse',
+    'farm-land',
+  ],
   commercial: [
     'office',
     'shop',
@@ -40,6 +50,8 @@ export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   villa: 'Villa / Bungalow',
   studio: 'Studio Apartment',
   plot: 'Residential Plot',
+  farmhouse: 'Farmhouse',
+  'farm-land': 'Farm Land',
   pg: 'PG / Shared Accommodation',
   office: 'Office Space',
   shop: 'Retail Shop',
@@ -140,20 +152,29 @@ export const FURNISHING_LABELS: Record<FurnishingStatus, string> = {
   furnished: 'Fully furnished',
 };
 
-export const AREA_UNITS = ['sqft', 'sqyd', 'sqm'] as const;
+export const AREA_UNITS = ['sqft', 'sqyd', 'sqm', 'bigha', 'acre'] as const;
 export type AreaUnit = (typeof AREA_UNITS)[number];
 
 export const AREA_UNIT_LABELS: Record<AreaUnit, string> = {
   sqft: 'sq ft',
   sqyd: 'sq yd',
   sqm: 'sq m',
+  bigha: 'bigha',
+  acre: 'acre',
 };
+
+/** Units for land area; farms are measured in these. */
+export const LAND_AREA_UNITS = ['bigha', 'acre'] as const satisfies readonly AreaUnit[];
+export type LandAreaUnit = (typeof LAND_AREA_UNITS)[number];
 
 /** Conversion factors to square feet, used to normalise area for filtering. */
 export const AREA_TO_SQFT: Record<AreaUnit, number> = {
   sqft: 1,
   sqyd: 9,
   sqm: 10.7639,
+  /** Jaipur pakka bigha: 3,025 sq yd. */
+  bigha: 27_225,
+  acre: 43_560,
 };
 
 export const AREA_TYPES = ['carpet', 'built-up', 'super-built-up', 'plot'] as const;
@@ -220,6 +241,60 @@ export const AMENITY_LABELS: Record<Amenity, string> = {
   reception: 'Reception area',
   'servant-room': 'Servant room',
   'pet-friendly': 'Pet friendly',
+};
+
+/* ---------------- Farms ---------------- */
+
+/** Farmhouses and farm land. Listed for sale only, and switchable from admin Settings. */
+export const FARM_TYPES = ['farmhouse', 'farm-land'] as const;
+export type FarmType = (typeof FARM_TYPES)[number];
+export const isFarmType = (t: string | null | undefined): t is FarmType =>
+  (FARM_TYPES as readonly string[]).includes(t ?? '');
+
+export const FARM_LAND_USES = ['agricultural', 'converted', 'jda-scheme', 'unknown'] as const;
+export type FarmLandUse = (typeof FARM_LAND_USES)[number];
+export const FARM_LAND_USE_LABELS: Record<FarmLandUse, string> = {
+  agricultural: 'Agricultural',
+  converted: 'Converted (90-A)',
+  'jda-scheme': 'JDA approved scheme',
+  unknown: 'Not sure',
+};
+
+export const FARM_WATER_SOURCES = ['borewell', 'canal', 'well', 'tanker', 'none'] as const;
+export type FarmWaterSource = (typeof FARM_WATER_SOURCES)[number];
+export const FARM_WATER_SOURCE_LABELS: Record<FarmWaterSource, string> = {
+  borewell: 'Borewell',
+  canal: 'Canal',
+  well: 'Well',
+  tanker: 'Tanker',
+  none: 'None',
+};
+
+export const FARM_ELECTRICITY = ['agricultural', 'domestic', 'solar', 'none'] as const;
+export type FarmElectricity = (typeof FARM_ELECTRICITY)[number];
+export const FARM_ELECTRICITY_LABELS: Record<FarmElectricity, string> = {
+  agricultural: 'Agricultural connection',
+  domestic: 'Domestic connection',
+  solar: 'Solar',
+  none: 'None',
+};
+
+export const FARM_FEATURES = [
+  'main-gate',
+  'fruit-trees',
+  'lawn',
+  'swimming-pool',
+  'caretaker-room',
+  'cattle-shed',
+] as const;
+export type FarmFeature = (typeof FARM_FEATURES)[number];
+export const FARM_FEATURE_LABELS: Record<FarmFeature, string> = {
+  'main-gate': 'Main gate',
+  'fruit-trees': 'Fruit trees',
+  lawn: 'Lawn',
+  'swimming-pool': 'Swimming pool',
+  'caretaker-room': 'Caretaker room',
+  'cattle-shed': 'Cattle shed',
 };
 
 /* ---------------- Plots and PG ---------------- */
@@ -687,3 +762,73 @@ export const SUPPORT_STATUS_LABELS: Record<SupportStatus, string> = {
   resolved: 'Resolved',
 };
 export const SUPPORT_MAX_IMAGES = 3;
+
+/* ------------------------------------------------------------------ */
+/* Site sections (Admin → Settings → Site sections)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Parts of the public site the admin can switch off with one click. Off hides the
+ * section everywhere (menus, home page, search, filters, sitemap, its pages) and hides
+ * its listings without deleting them. To add a section (e.g. farm), add it here, to
+ * SITE_SECTION_INFO, and to listingSections() below.
+ */
+export const SITE_SECTIONS = ['buy', 'rent', 'projects', 'pg', 'plot', 'commercial'] as const;
+export type SiteSection = (typeof SITE_SECTIONS)[number];
+export type SiteSections = Record<SiteSection, boolean>;
+
+export const DEFAULT_SITE_SECTIONS = Object.fromEntries(
+  SITE_SECTIONS.map((s) => [s, true]),
+) as SiteSections;
+
+/** What turning a section off does to its pages: send visitors on, or show "not found". */
+export const SECTION_OFF_ACTIONS = ['redirect', 'not-found'] as const;
+export type SectionOffAction = (typeof SECTION_OFF_ACTIONS)[number];
+
+export const SITE_SECTION_INFO: Record<
+  SiteSection,
+  { label: string; where: string; big?: boolean }
+> = {
+  buy: { label: 'Buy', where: '/buy pages, Buy menu, homepage Buy tab', big: true },
+  rent: { label: 'Rent', where: '/rent pages, Rent menu, homepage Rent tab', big: true },
+  projects: { label: 'New projects', where: '/projects, project pages, homepage projects' },
+  pg: { label: 'PG', where: 'PG search tab, PG filters, PG links' },
+  plot: { label: 'Plots', where: 'Plot search tab, plot filters, plot links' },
+  commercial: { label: 'Commercial', where: '/commercial, Commercial menu, homepage tiles' },
+};
+
+type SectionListing = { category: string; listingType: string; propertyType: string };
+
+/** The switches a listing depends on: it is public only while all of them are on. */
+export function listingSections(p: SectionListing): SiteSection[] {
+  const out: SiteSection[] = [];
+  if (p.category === 'commercial') out.push('commercial');
+  else if (p.category === 'residential') out.push(p.listingType === 'rent' ? 'rent' : 'buy');
+  if (p.propertyType === 'pg') out.push('pg');
+  if (p.propertyType === 'plot') out.push('plot');
+  return out;
+}
+
+/** The first switched-off section a listing belongs to, or null when it is public. */
+export function listingSectionOff(
+  p: SectionListing,
+  on: Partial<SiteSections> | undefined,
+): SiteSection | null {
+  return listingSections(p).find((s) => on?.[s] === false) ?? null;
+}
+
+/**
+ * Database conditions for listings hidden by switched-off sections, for a `$nor`.
+ * Plain objects so the API can pass them straight to MongoDB.
+ */
+export function hiddenListingConditions(
+  on: Partial<SiteSections> | undefined,
+): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  if (on?.buy === false) out.push({ category: 'residential', listingType: 'sale' });
+  if (on?.rent === false) out.push({ category: 'residential', listingType: 'rent' });
+  if (on?.commercial === false) out.push({ category: 'commercial' });
+  if (on?.pg === false) out.push({ propertyType: 'pg' });
+  if (on?.plot === false) out.push({ propertyType: 'plot' });
+  return out;
+}
