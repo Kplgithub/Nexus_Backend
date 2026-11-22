@@ -12,6 +12,7 @@ import {
   type PlanUsage,
   type MySubscription,
   type Payment as PaymentDto,
+  type PaymentInvoice,
   type PaymentSummary,
   type Plan as PlanDto,
   type UserRole,
@@ -27,7 +28,7 @@ import { escapeRegex, paginate } from '../lib/respond.js';
 import { Payment, Plan } from '../models/admin-panel.models.js';
 import { User } from '../models/user.model.js';
 import { Property } from '../models/property.model.js';
-import { Enquiry } from '../models/misc.models.js';
+import { City, Counter, Enquiry } from '../models/misc.models.js';
 import { businessAlert, sendWhatsApp } from './notification.service.js';
 import { sendMail } from './mail.service.js';
 import { getSettings } from './settings.service.js';
@@ -46,6 +47,11 @@ type PlanLean = {
   featuredListings?: number | null;
   featuredDays?: number | null;
   leadLimit?: number | null;
+  mrp?: number | null;
+  searchRank?: number | null;
+  partnerBadge?: boolean | null;
+  autoRefreshDays?: number | null;
+  recommended?: boolean | null;
   roles: string[];
   active: boolean;
   sortOrder?: number | null;
@@ -61,6 +67,11 @@ const toPlan = (p: PlanLean): PlanDto => ({
   featuredListings: p.featuredListings ?? 0,
   featuredDays: p.featuredDays ?? 7,
   leadLimit: p.leadLimit ?? 0,
+  mrp: p.mrp ?? 0,
+  searchRank: p.searchRank ?? 0,
+  partnerBadge: p.partnerBadge ?? false,
+  autoRefreshDays: p.autoRefreshDays ?? 0,
+  recommended: p.recommended ?? false,
   roles: p.roles as UserRole[],
   active: p.active,
   sortOrder: p.sortOrder ?? 0,
@@ -96,16 +107,26 @@ const snapshotOf = (plan: PlanLean) => ({
   featuredListings: plan.featuredListings ?? 0,
   featuredDays: plan.featuredDays ?? 7,
   leadLimit: plan.leadLimit ?? 0,
+  searchRank: plan.searchRank ?? 0,
+  partnerBadge: plan.partnerBadge ?? false,
+  autoRefreshDays: plan.autoRefreshDays ?? 0,
 });
+
+/** Only one plan can be "Most chosen": marking one clears the rest. */
+async function keepOneRecommended(id: Types.ObjectId | string) {
+  await Plan.updateMany({ _id: { $ne: id }, recommended: true }, { $set: { recommended: false } });
+}
 
 export async function createPlan(input: z.output<typeof planSchema>) {
   const p = await Plan.create(input);
+  if (input.recommended) await keepOneRecommended(p._id);
   return toPlan(p.toObject() as unknown as PlanLean);
 }
 
 export async function updatePlan(id: string, patch: z.output<typeof planUpdateSchema>) {
   const p = await Plan.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean<PlanLean>();
   if (!p) throw notFound('Plan not found');
+  if (patch.recommended) await keepOneRecommended(p._id);
   return toPlan(p);
 }
 
@@ -125,6 +146,9 @@ type PaymentLean = {
     featuredListings?: number | null;
     featuredDays?: number | null;
     leadLimit?: number | null;
+    searchRank?: number | null;
+    partnerBadge?: boolean | null;
+    autoRefreshDays?: number | null;
   };
   amount: number;
   status: PaymentDto['status'];
@@ -137,6 +161,7 @@ type PaymentLean = {
   paidAt?: Date | null;
   startsAt?: Date | null;
   endsAt?: Date | null;
+  invoiceNo?: string | null;
   createdAt: Date;
 };
 
@@ -150,6 +175,9 @@ const planRef = (p: PaymentLean) => ({
   featuredListings: p.planSnapshot.featuredListings ?? 0,
   featuredDays: p.planSnapshot.featuredDays ?? 7,
   leadLimit: p.planSnapshot.leadLimit ?? 0,
+  searchRank: p.planSnapshot.searchRank ?? 0,
+  partnerBadge: p.planSnapshot.partnerBadge ?? false,
+  autoRefreshDays: p.planSnapshot.autoRefreshDays ?? 0,
 });
 
 const propertyRefOf = (p: PaymentLean['property']) =>
@@ -179,6 +207,7 @@ const toPayment = (p: PaymentLean): PaymentDto => ({
   paidAt: iso(p.paidAt),
   startsAt: iso(p.startsAt),
   endsAt: iso(p.endsAt),
+  invoiceNo: p.invoiceNo ?? null,
   createdAt: p.createdAt.toISOString(),
 });
 
@@ -243,6 +272,176 @@ export async function paymentSummary(): Promise<PaymentSummary> {
   };
 }
 
+/* ---------------- Invoices ---------------- */
+
+/** Indian financial year of a date, e.g. "2026-27" (April to March, India time). */
+export function financialYear(d: Date) {
+  const ist = new Date(d.getTime() + 330 * 60_000);
+  const y = ist.getUTCMonth() >= 3 ? ist.getUTCFullYear() : ist.getUTCFullYear() - 1;
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+}
+
+/** Next invoice number in the payment's financial year: NX/2026-27/0001, NX/2026-27/0002 … */
+async function nextInvoiceNo(paidAt: Date) {
+  const fy = financialYear(paidAt);
+  const c = await Counter.findOneAndUpdate(
+    { _id: `INV-${fy}` },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true },
+  ).lean();
+  return `NX/${fy}/${String(c!.seq).padStart(4, '0')}`;
+}
+
+const ONES = [
+  '',
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+  'Thirteen',
+  'Fourteen',
+  'Fifteen',
+  'Sixteen',
+  'Seventeen',
+  'Eighteen',
+  'Nineteen',
+];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+function belowHundred(n: number) {
+  return n < 20 ? ONES[n]! : [TENS[Math.floor(n / 10)], ONES[n % 10]].filter(Boolean).join(' ');
+}
+
+function belowThousand(n: number) {
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  return [h ? `${ONES[h]} Hundred` : '', rest ? belowHundred(rest) : ''].filter(Boolean).join(' ');
+}
+
+/** Whole rupees in Indian words: 1,23,456 → "One Lakh Twenty Three Thousand Four Hundred Fifty Six". */
+export function rupeesInWords(amount: number) {
+  let n = Math.round(amount);
+  if (n === 0) return 'Rupees Zero Only';
+  const parts: string[] = [];
+  const crore = Math.floor(n / 10_000_000);
+  n %= 10_000_000;
+  const lakh = Math.floor(n / 100_000);
+  n %= 100_000;
+  const thousand = Math.floor(n / 1000);
+  n %= 1000;
+  if (crore) parts.push(`${belowThousand(crore)} Crore`);
+  if (lakh) parts.push(`${belowHundred(lakh)} Lakh`);
+  if (thousand) parts.push(`${belowHundred(thousand)} Thousand`);
+  if (n) parts.push(belowThousand(n));
+  return `Rupees ${parts.join(' ')} Only`;
+}
+
+const GST_RATE = 18;
+const paise = (n: number) => Math.round(n * 100) / 100;
+
+/** Splits a GST-inclusive total into value before tax and the tax parts. */
+export function gstBreakup(total: number, sameState: boolean) {
+  const taxable = paise(total / (1 + GST_RATE / 100));
+  const tax = paise(total - taxable);
+  if (!sameState) return { taxable, cgst: 0, sgst: 0, igst: tax };
+  const cgst = paise(tax / 2);
+  return { taxable, cgst, sgst: paise(tax - cgst), igst: 0 };
+}
+
+const sameText = (a?: string | null, b?: string | null) =>
+  !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * The invoice for one paid (or refunded) payment. With `userId` the payment must be that
+ * user's own. Older payments get their invoice number the first time it is opened.
+ */
+export async function paymentInvoice(id: string, userId?: string): Promise<PaymentInvoice> {
+  const p = await Payment.findOne({ _id: id, ...(userId ? { user: userId } : {}) });
+  if (!p || (p.status !== 'paid' && p.status !== 'refunded')) throw notFound('Invoice not found');
+  const paidAt = p.paidAt ?? (p as unknown as { createdAt: Date }).createdAt;
+  if (!p.invoiceNo) {
+    p.invoiceNo = await nextInvoiceNo(paidAt);
+    await p.save();
+  }
+  const [settings, user, property] = await Promise.all([
+    getSettings(),
+    User.findById(p.user).select('name phone email companyName citySlug').lean(),
+    p.property ? Property.findById(p.property).select('title').lean() : null,
+  ]);
+  const city = user?.citySlug
+    ? await City.findOne({ slug: user.citySlug }).select('name state').lean()
+    : null;
+  const inv = settings.invoice;
+  const gstin = inv.gstin ?? null;
+  // Buyers with no city on file are taken as local: the site serves Jaipur today.
+  const sameState = !city || sameText(city.state, inv.state);
+  const taxed = gstin
+    ? gstBreakup(p.amount, sameState)
+    : { taxable: p.amount, cgst: 0, sgst: 0, igst: 0 };
+  const snap = p.planSnapshot;
+  const featured = p.kind === 'featured';
+  const sellerAddress =
+    inv.address ||
+    [settings.address.line1, settings.address.line2, settings.address.city, settings.address.state]
+      .filter(Boolean)
+      .join(', ');
+  return {
+    number: p.invoiceNo!,
+    kind: gstin ? 'tax-invoice' : 'receipt',
+    date: paidAt.toISOString(),
+    status: p.status as 'paid' | 'refunded',
+    seller: {
+      name: settings.businessName,
+      legalName: inv.legalName || settings.businessName,
+      gstin,
+      address: sellerAddress,
+      state: inv.state,
+      phone: settings.phone,
+      email: settings.email ?? null,
+    },
+    buyer: {
+      name: user?.name ?? 'Customer',
+      company: user?.companyName || null,
+      phone: user?.phone ?? '',
+      email: user?.email ?? null,
+      city: city?.name ?? null,
+      state: city?.state ?? null,
+    },
+    item: {
+      description: featured
+        ? `${snap?.name ?? 'Featured listing'}`
+        : `${snap?.name ?? 'Membership'} plan · ${snap?.durationDays ?? 30} days`,
+      detail: featured
+        ? (property?.title ?? null)
+        : `Up to ${snap?.listingLimit ?? 0} live listings at a time`,
+      sacCode: inv.sacCode || null,
+      from: p.startsAt ? p.startsAt.toISOString() : null,
+      to: p.endsAt ? p.endsAt.toISOString() : null,
+    },
+    total: p.amount,
+    taxable: taxed.taxable,
+    gstRate: gstin ? GST_RATE : 0,
+    cgst: taxed.cgst,
+    sgst: taxed.sgst,
+    igst: taxed.igst,
+    totalInWords: rupeesInWords(p.amount),
+    payment: {
+      method: p.method as PaymentInvoice['payment']['method'],
+      paymentId: p.paymentId ?? null,
+      orderId: p.orderId ?? null,
+      reference: p.reference ?? null,
+    },
+  };
+}
+
 /** A new plan starts when the current one ends, so renewing early never loses days. */
 async function periodFor(userId: Types.ObjectId, durationDays: number) {
   const current = await Payment.findOne({
@@ -271,10 +470,12 @@ async function markPaid(
   payment.paidAt = new Date();
   payment.startsAt = startsAt;
   payment.endsAt = endsAt;
+  payment.invoiceNo ??= await nextInvoiceNo(payment.paidAt);
   if (extra.paymentId) payment.paymentId = extra.paymentId;
   if (extra.recordedBy) payment.recordedBy = extra.recordedBy;
   await payment.save();
   await syncPremium(payment.user as Types.ObjectId);
+  await syncPlanPerksFor(String(payment.user));
   await unlockLeads(payment.user as Types.ObjectId);
   await releaseAwaitingListings(String(payment.user));
   const user = await User.findById(payment.user).select('name email').lean();
@@ -335,6 +536,7 @@ export async function refundPayment(id: string, by: string) {
       { $set: { featured: false, featuredUntil: null } },
     );
   await syncPremium(p.user as Types.ObjectId);
+  await syncPlanPerksFor(String(p.user));
   return getPayment(p._id);
 }
 
@@ -442,6 +644,85 @@ async function syncPremium(userId: Types.ObjectId) {
     .select('endsAt')
     .lean();
   await User.updateOne({ _id: userId }, { $set: { premiumUntil: last?.endsAt ?? null } });
+}
+
+/* ---------------- Plan perks on listings ---------------- */
+
+type Perks = { boostRank: number; partnerBadge: boolean; autoRefreshDays: number };
+const NO_PERKS: Perks = { boostRank: 0, partnerBadge: false, autoRefreshDays: 0 };
+
+const perksOf = (snap?: PaymentLean['planSnapshot'] | null): Perks =>
+  snap
+    ? {
+        boostRank: snap.searchRank ?? 0,
+        partnerBadge: Boolean(snap.partnerBadge),
+        autoRefreshDays: snap.autoRefreshDays ?? 0,
+      }
+    : NO_PERKS;
+
+/** Search position and badge a new listing gets from the poster's current plan. */
+export async function listingPerksFor(userId: string) {
+  const { boostRank, partnerBadge } = perksOf((await currentPlanPayment(userId))?.planSnapshot);
+  return { boostRank, partnerBadge };
+}
+
+/** Puts one user's plan position and badge on all their listings, and refreshes when due. */
+async function applyPerks(userId: string | Types.ObjectId, perks: Perks, now: Date) {
+  await Property.updateMany(
+    {
+      postedBy: userId,
+      $or: [{ boostRank: { $ne: perks.boostRank } }, { partnerBadge: { $ne: perks.partnerBadge } }],
+    },
+    { $set: { boostRank: perks.boostRank, partnerBadge: perks.partnerBadge } },
+  );
+  if (perks.autoRefreshDays > 0)
+    await Property.updateMany(
+      {
+        postedBy: userId,
+        status: 'published',
+        refreshedAt: { $lt: new Date(now.getTime() - perks.autoRefreshDays * DAY) },
+      },
+      { $set: { refreshedAt: now } },
+    );
+}
+
+export async function syncPlanPerksFor(userId: string, now = new Date()) {
+  await applyPerks(userId, perksOf((await currentPlanPayment(userId))?.planSnapshot), now);
+}
+
+/**
+ * Runs on the sweep: every user with a plan on gets its search position, badge and auto
+ * refresh; listings of users whose plan ended go back to normal. Also fills refreshedAt
+ * on listings published before it existed.
+ */
+export async function syncPlanPerks(now = new Date()) {
+  await Property.updateMany({ refreshedAt: null, publishedAt: { $ne: null } }, [
+    { $set: { refreshedAt: '$publishedAt' } },
+  ]);
+  const pays = await Payment.find({
+    ...PLAN_ONLY,
+    status: 'paid',
+    startsAt: { $lte: now },
+    endsAt: { $gt: now },
+  })
+    .sort({ endsAt: -1 })
+    .select('user planSnapshot')
+    .lean<PaymentLean[]>();
+  const seen = new Set<string>();
+  for (const p of pays) {
+    const uid = String(p.user);
+    if (seen.has(uid)) continue;
+    seen.add(uid);
+    await applyPerks(uid, perksOf(p.planSnapshot), now);
+  }
+  await Property.updateMany(
+    {
+      postedBy: { $nin: [...seen].map((id) => new Types.ObjectId(id)) },
+      $or: [{ boostRank: { $gt: 0 } }, { partnerBadge: true }],
+    },
+    { $set: { boostRank: 0, partnerBadge: false } },
+  );
+  return seen.size;
 }
 
 /** A paid plan shows every lead that was held back. */
@@ -625,9 +906,16 @@ async function markFeaturedPaid(
   payment: InstanceType<typeof Payment>,
   extra: { paymentId?: string; recordedBy?: string },
 ) {
-  const until = await extendFeatured(payment.property as Types.ObjectId, payment.featureDays ?? 7);
+  const days = payment.featureDays ?? 7;
+  const until = await extendFeatured(payment.property as Types.ObjectId, days);
   payment.status = 'paid';
   payment.paidAt = new Date();
+  // The paid days are the last `days` of the listing's Featured time.
+  if (until) {
+    payment.endsAt = until;
+    payment.startsAt = new Date(until.getTime() - days * DAY);
+  }
+  payment.invoiceNo ??= await nextInvoiceNo(payment.paidAt);
   if (extra.paymentId) payment.paymentId = extra.paymentId;
   if (extra.recordedBy) payment.recordedBy = extra.recordedBy;
   await payment.save();

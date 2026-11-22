@@ -134,6 +134,12 @@ const propertySchema = new Schema(
     featured: { type: Boolean, default: false },
     /** Featured placement ends here; null means until removed by hand. */
     featuredUntil: { type: Date, default: null },
+    /** From the poster's plan: 0 Normal .. 3 Top. Kept in step by syncPlanPerks. */
+    boostRank: { type: Number, default: 0 },
+    /** From the poster's plan: shows the Premium Partner badge. */
+    partnerBadge: { type: Boolean, default: false },
+    /** Moves the listing back to the top: set on publish and by plan auto refresh. */
+    refreshedAt: { type: Date, default: null },
     /** Complete and saved, but the poster must take a plan before it goes for review. */
     awaitingPlan: { type: Boolean, default: false },
     /** Already counted against the poster's free or plan listings, so re-submits are free. */
@@ -185,6 +191,15 @@ propertySchema.index({
 propertySchema.index({ status: 1, listingVisibility: 1, citySlug: 1, publishedAt: -1 });
 propertySchema.index({ status: 1, listingVisibility: 1, propertyType: 1, price: 1 });
 propertySchema.index({ status: 1, featured: 1, publishedAt: -1 });
+// Default "newest" order: featured, then plan position, then last refresh.
+propertySchema.index({
+  status: 1,
+  listingVisibility: 1,
+  featured: -1,
+  boostRank: -1,
+  refreshedAt: -1,
+});
+propertySchema.index({ postedBy: 1, status: 1, refreshedAt: 1 });
 propertySchema.index({ postedBy: 1, status: 1, updatedAt: -1 });
 propertySchema.index({ status: 1, submittedAt: 1 });
 propertySchema.index({ isDemo: 1 });

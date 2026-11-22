@@ -303,6 +303,10 @@ meRouter.post('/properties/:id/feature-checkout', limiters.userWrite, async (req
   ok(res, await billing.createFeatureCheckout(req.user!.id, parseId(req), days));
 });
 
+meRouter.get('/payments/:id/invoice', async (req, res) =>
+  ok(res, await billing.paymentInvoice(parseId(req), req.user!.id)),
+);
+
 meRouter.post('/payments/verify', limiters.userWrite, async (req, res) =>
   ok(res, await billing.confirmCheckout(req.user!.id, parseBody(paymentVerifySchema, req))),
 );

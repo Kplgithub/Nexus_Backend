@@ -190,7 +190,15 @@ export type PropertyCard = Pick<
   | 'location'
   | 'plotApproval'
   | 'pgGender'
-> & { posterType: PosterType; imageCount: number; areaSqft: number };
+> & {
+  posterType: PosterType;
+  imageCount: number;
+  areaSqft: number;
+  /** The poster's plan gives a Premium Partner badge. */
+  partnerBadge: boolean;
+  /** Last time the listing moved back to the top (publish or plan auto refresh). */
+  refreshedAt: string | null;
+};
 
 /** A user's view of their own listing. */
 export type OwnListing = Omit<PublicProperty, 'status' | 'poster'> & {
@@ -300,6 +308,17 @@ export type HomeBanner = {
   active: boolean;
 };
 
+export type InvoiceSettings = {
+  /** Registered business name, if different from the brand name. */
+  legalName: string;
+  /** With a GSTIN the invoice is a tax invoice with GST; without it, a payment receipt. */
+  gstin?: string;
+  address: string;
+  /** State of the GST registration, e.g. Rajasthan. */
+  state: string;
+  sacCode: string;
+};
+
 export type SiteSettings = {
   businessName: string;
   tagline: string;
@@ -328,6 +347,8 @@ export type SiteSettings = {
   allowInternationalEnquiries: boolean;
   /** Paid Featured prices in rupees (GST included), set by admin. */
   featurePrices: { days7: number; days30: number };
+  /** Admin only. Business details printed on payment invoices. */
+  invoice: InvoiceSettings;
   /** Admin only. */
   enquiryNotificationEmail?: string;
   /** Home loan page: rates table and calculator defaults. */
@@ -844,6 +865,14 @@ export type Plan = {
   featuredDays: number;
   /** 0 means no limit. */
   leadLimit: number;
+  /** Cut price shown struck through; 0 means none. */
+  mrp: number;
+  /** 0 Normal, 1 High, 2 Higher, 3 Top (SEARCH_RANKS). */
+  searchRank: number;
+  partnerBadge: boolean;
+  /** 0 means off. */
+  autoRefreshDays: number;
+  recommended: boolean;
   roles: UserRole[];
   active: boolean;
   sortOrder: number;
@@ -863,6 +892,9 @@ export type Payment = {
     featuredListings: number;
     featuredDays: number;
     leadLimit: number;
+    searchRank: number;
+    partnerBadge: boolean;
+    autoRefreshDays: number;
   };
   amount: number;
   status: PaymentStatus;
@@ -875,7 +907,57 @@ export type Payment = {
   paidAt: string | null;
   startsAt: string | null;
   endsAt: string | null;
+  /** Set once the payment is paid, e.g. NX/2026-27/0001. */
+  invoiceNo: string | null;
   createdAt: string;
+};
+
+/** A printable invoice (with GST) or payment receipt (without GSTIN) for one paid payment. */
+export type PaymentInvoice = {
+  number: string;
+  kind: 'tax-invoice' | 'receipt';
+  /** Date of payment. */
+  date: string;
+  status: 'paid' | 'refunded';
+  seller: {
+    name: string;
+    legalName: string;
+    gstin: string | null;
+    address: string;
+    state: string;
+    phone: string;
+    email: string | null;
+  };
+  buyer: {
+    name: string;
+    company: string | null;
+    phone: string;
+    email: string | null;
+    city: string | null;
+    state: string | null;
+  };
+  item: {
+    description: string;
+    detail: string | null;
+    sacCode: string | null;
+    from: string | null;
+    to: string | null;
+  };
+  /** Amount paid in rupees. Prices include GST. */
+  total: number;
+  /** Value before GST, in rupees with paise. Equals total for a receipt. */
+  taxable: number;
+  gstRate: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  totalInWords: string;
+  payment: {
+    method: PaymentMethod;
+    paymentId: string | null;
+    orderId: string | null;
+    reference: string | null;
+  };
 };
 
 export type PaymentSummary = {

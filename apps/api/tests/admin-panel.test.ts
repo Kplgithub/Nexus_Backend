@@ -18,7 +18,13 @@ import { Property } from '../src/models/property.model.js';
 import { SiteSettings } from '../src/models/misc.models.js';
 import { clearSettingsCache } from '../src/services/settings.service.js';
 import { expireFeatured } from '../src/services/featured.service.js';
-import { ensureDefaultPlan, razorpaySignatureValid } from '../src/services/billing.service.js';
+import {
+  ensureDefaultPlan,
+  financialYear,
+  gstBreakup,
+  razorpaySignatureValid,
+  rupeesInWords,
+} from '../src/services/billing.service.js';
 import { istDayStart } from '../src/services/charts.service.js';
 
 let app: Express;
@@ -660,5 +666,122 @@ describe('alert settings', () => {
     expect(res.body.data.channels).toEqual({ email: false, whatsapp: false });
     const bad = await boss.patch('/api/v1/admin/alerts', { whatsappNumbers: ['9521750202'] });
     expect(bad.status).toBe(422);
+  });
+});
+
+describe('payment invoices', () => {
+  const premium = async () =>
+    (
+      await boss.post('/api/v1/admin/plans', {
+        name: 'Premium',
+        price: 999,
+        durationDays: 30,
+        listingLimit: 25,
+        roles: ['agent'],
+      })
+    ).body.data;
+
+  it('gives each paid payment an invoice; a receipt without GSTIN, a tax invoice with it', async () => {
+    const plan = await premium();
+    const agent = await signUpUser(app, 'agent');
+    const paid = (
+      await boss.post('/api/v1/admin/payments/manual', {
+        userId: agent.user.id,
+        planId: plan.id,
+        amount: 999,
+        reference: 'UPI 77',
+      })
+    ).body.data;
+    expect(paid.invoiceNo).toMatch(/^NX\/\d{4}-\d{2}\/0001$/);
+
+    const receipt = await agent.get(`/api/v1/me/payments/${paid.id}/invoice`);
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.data).toMatchObject({
+      number: paid.invoiceNo,
+      kind: 'receipt',
+      status: 'paid',
+      total: 999,
+      taxable: 999,
+      gstRate: 0,
+      totalInWords: 'Rupees Nine Hundred Ninety Nine Only',
+      payment: { method: 'manual', reference: 'UPI 77' },
+    });
+    expect(receipt.body.data.item.from).toBeTruthy();
+    expect(receipt.body.data.item.to).toBeTruthy();
+
+    // Another user cannot open it.
+    const other = await signUpUser(app, 'agent');
+    expect((await other.get(`/api/v1/me/payments/${paid.id}/invoice`)).status).toBe(404);
+
+    // Bad GSTIN is refused; a good one turns the receipt into a tax invoice.
+    expect(
+      (await boss.patch('/api/v1/admin/settings', { invoice: { gstin: '08ABC' } })).status,
+    ).toBe(422);
+    const set = await boss.patch('/api/v1/admin/settings', {
+      invoice: { gstin: '08abcde1234f1z5', legalName: 'Nexus Estate', sacCode: '998365' },
+    });
+    expect(set.status).toBe(200);
+    // Not shown on the public site settings.
+    expect((await request(app).get('/api/v1/settings')).body.data.invoice).toBeUndefined();
+
+    const tax = (await boss.get(`/api/v1/admin/payments/${paid.id}/invoice`)).body.data;
+    expect(tax).toMatchObject({
+      kind: 'tax-invoice',
+      number: paid.invoiceNo,
+      seller: { gstin: '08ABCDE1234F1Z5', state: 'Rajasthan' },
+      item: { sacCode: '998365' },
+      gstRate: 18,
+      total: 999,
+      taxable: 846.61,
+      cgst: 76.19,
+      sgst: 76.2,
+      igst: 0,
+    });
+
+    // The next payment gets the next number.
+    const second = (
+      await boss.post('/api/v1/admin/payments/manual', {
+        userId: other.user.id,
+        planId: plan.id,
+        amount: 999,
+      })
+    ).body.data;
+    expect(second.invoiceNo).toMatch(/\/0002$/);
+    await boss.post(`/api/v1/admin/payments/${second.id}/refund`);
+    expect((await other.get(`/api/v1/me/payments/${second.id}/invoice`)).body.data.status).toBe(
+      'refunded',
+    );
+  });
+
+  it('numbers older payments the first time their invoice opens', async () => {
+    const plan = await premium();
+    const agent = await signUpUser(app, 'agent');
+    const paid = (
+      await boss.post('/api/v1/admin/payments/manual', {
+        userId: agent.user.id,
+        planId: plan.id,
+        amount: 999,
+      })
+    ).body.data;
+    await Payment.updateOne({ _id: paid.id }, { $set: { invoiceNo: null } });
+    const inv = (await agent.get(`/api/v1/me/payments/${paid.id}/invoice`)).body.data;
+    expect(inv.number).toMatch(/\/0002$/);
+    const listed = (await agent.get('/api/v1/me/plans')).body.data.payments[0];
+    expect(listed.invoiceNo).toBe(inv.number);
+  });
+
+  it('works out financial years, GST parts and amounts in words', () => {
+    expect(financialYear(new Date('2026-11-22T10:00:00Z'))).toBe('2026-27');
+    expect(financialYear(new Date('2027-03-31T18:00:00Z'))).toBe('2026-27');
+    // 1 April 00:30 India time is already the new year.
+    expect(financialYear(new Date('2027-03-31T19:00:00Z'))).toBe('2027-28');
+    expect(gstBreakup(49, false)).toEqual({ taxable: 41.53, cgst: 0, sgst: 0, igst: 7.47 });
+    const b = gstBreakup(99, true);
+    expect(b.taxable + b.cgst + b.sgst).toBeCloseTo(99, 2);
+    expect(rupeesInWords(49)).toBe('Rupees Forty Nine Only');
+    expect(rupeesInWords(123456)).toBe(
+      'Rupees One Lakh Twenty Three Thousand Four Hundred Fifty Six Only',
+    );
+    expect(rupeesInWords(10_000_000)).toBe('Rupees One Crore Only');
   });
 });

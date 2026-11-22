@@ -53,6 +53,16 @@ const planSchema = new Schema(
     featuredDays: { type: Number, default: 7 },
     /** Leads with contact details per plan period; 0 means no limit. */
     leadLimit: { type: Number, default: 0 },
+    /** Cut price shown struck through; 0 means none. */
+    mrp: { type: Number, default: 0 },
+    /** Position on search: 0 Normal, 1 High, 2 Higher, 3 Top. */
+    searchRank: { type: Number, min: 0, max: 3, default: 0 },
+    /** Premium Partner badge on the poster's listings and profile. */
+    partnerBadge: { type: Boolean, default: false },
+    /** Listings move back to the top every N days; 0 is off. */
+    autoRefreshDays: { type: Number, default: 0 },
+    /** "Most chosen" in the plans popup. */
+    recommended: { type: Boolean, default: false },
     roles: { type: [String], enum: USER_ROLES, default: [] },
     active: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
@@ -80,6 +90,9 @@ const paymentSchema = new Schema(
       featuredListings: Number,
       featuredDays: Number,
       leadLimit: Number,
+      searchRank: Number,
+      partnerBadge: Boolean,
+      autoRefreshDays: Number,
     },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR' },
@@ -93,6 +106,8 @@ const paymentSchema = new Schema(
     paidAt: { type: Date, default: null },
     startsAt: { type: Date, default: null },
     endsAt: { type: Date, default: null },
+    /** Invoice number given when the payment is paid, e.g. NX/2026-27/0001. */
+    invoiceNo: { type: String, default: null },
     /** Set once the "your plan ends soon" reminder went out. */
     reminderSentAt: { type: Date, default: null },
   },
@@ -104,6 +119,10 @@ paymentSchema.index({ status: 1, createdAt: -1 });
 paymentSchema.index(
   { orderId: 1 },
   { unique: true, partialFilterExpression: { orderId: { $type: 'string' } } },
+);
+paymentSchema.index(
+  { invoiceNo: 1 },
+  { unique: true, partialFilterExpression: { invoiceNo: { $type: 'string' } } },
 );
 export const Payment = model('Payment', paymentSchema);
 

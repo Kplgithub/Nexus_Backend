@@ -460,6 +460,14 @@ export const FREE_LEADS_PER_MONTH: Record<UserRole, number> = {
 };
 
 /** The plan created on first start, so the site has something to sell. Admins can edit it. */
+/** Plan "Position on search" levels, lowest first. The index is stored as plan.searchRank. */
+export const SEARCH_RANKS = ['Normal', 'High', 'Higher', 'Top'] as const;
+/** Plan auto refresh choices in days. 0 means off. */
+export const AUTO_REFRESH_DAYS = [0, 3, 7, 15] as const;
+export type AutoRefreshDays = (typeof AUTO_REFRESH_DAYS)[number];
+/** The plans popup and comparison table show at most this many plans. */
+export const MAX_COMPARE_PLANS = 4;
+
 export const DEFAULT_PLAN = {
   name: 'Premium',
   description: 'For owners, agents and builders who want more listings and every lead.',

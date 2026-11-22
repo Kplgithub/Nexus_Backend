@@ -3,7 +3,7 @@ import { connectDb, disconnectDb } from './db.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { expireFeatured } from './services/featured.service.js';
-import { ensureDefaultPlan, sendPlanReminders } from './services/billing.service.js';
+import { ensureDefaultPlan, sendPlanReminders, syncPlanPerks } from './services/billing.service.js';
 import { migrateSeekers } from './services/user.service.js';
 
 async function main() {
@@ -25,6 +25,7 @@ async function main() {
   const sweep = () => {
     void expireFeatured().catch((err) => logger.warn({ err }, 'expire sweep'));
     void sendPlanReminders().catch((err) => logger.warn({ err }, 'plan reminders'));
+    void syncPlanPerks().catch((err) => logger.warn({ err }, 'plan perks'));
   };
   sweep();
   setInterval(sweep, 10 * 60_000).unref();

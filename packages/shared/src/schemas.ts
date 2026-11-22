@@ -30,6 +30,8 @@ import {
   SUPPORT_STATUSES,
   SUPPORT_TOPICS,
   LISTING_ROLES,
+  SEARCH_RANKS,
+  AUTO_REFRESH_DAYS,
   USER_SETTABLE_STATUSES,
   USER_STATUSES,
   ENQUIRY_TYPES,
@@ -859,6 +861,9 @@ export const homeLoanSettingsSchema = z.object({
   exampleRate: z.coerce.number().min(1).max(30).default(8.5),
 });
 
+/** Indian GST number: 2 digit state code, PAN, entity number, Z, check digit. */
+export const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
 export const siteSettingsSchema = z.object({
   businessName: plainText(2, 80),
   tagline: plainText(0, 80),
@@ -919,6 +924,26 @@ export const siteSettingsSchema = z.object({
       days30: z.coerce.number().int().min(1).max(100000),
     })
     .default({ days7: 49, days30: 99 }),
+  /** Business details printed on payment invoices. With a GSTIN the invoice shows GST. */
+  invoice: z
+    .object({
+      legalName: plainText(0, 120).default(''),
+      gstin: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(GSTIN_RE, 'Enter a valid 15 character GSTIN')
+        .optional()
+        .or(z.literal('').transform(() => undefined)),
+      address: plainText(0, 300).default(''),
+      state: plainText(0, 60).default('Rajasthan'),
+      sacCode: z
+        .string()
+        .trim()
+        .regex(/^\d{0,8}$/, 'SAC code is numbers only')
+        .default(''),
+    })
+    .default({ legalName: '', address: '', state: 'Rajasthan', sacCode: '' }),
   enquiryNotificationEmail: z
     .string()
     .trim()
@@ -1285,24 +1310,54 @@ export const featureListingSchema = z.object({
   days: z.union([z.literal(0), ...FEATURE_DAYS.map((d) => z.literal(d))]),
 });
 
-export const planSchema = z.object({
+const planFields = {
   name: plainText(2, 60),
-  description: plainText(0, 300).default(''),
+  description: plainText(0, 300),
   /** Rupees, GST included. */
   price: z.number().int().min(1).max(10_000_000),
+  /** Optional cut price shown struck through. 0 means none. */
+  mrp: z.number().int().min(0).max(10_000_000),
   durationDays: z.number().int().min(1).max(730),
   listingLimit: z.number().int().min(1).max(10_000),
-  featuredListings: z.number().int().min(0).max(1000).default(0),
+  featuredListings: z.number().int().min(0).max(1000),
   /** How long each featured listing stays featured. */
-  featuredDays: z.number().int().min(1).max(90).default(7),
+  featuredDays: z.number().int().min(1).max(90),
   /** Leads with contact details per plan period. 0 means no limit. */
-  leadLimit: z.number().int().min(0).max(100_000).default(0),
+  leadLimit: z.number().int().min(0).max(100_000),
+  /** Position on search: 0 Normal, 1 High, 2 Higher, 3 Top (see SEARCH_RANKS). */
+  searchRank: z
+    .number()
+    .int()
+    .min(0)
+    .max(SEARCH_RANKS.length - 1),
+  /** Premium Partner badge on the poster's listings and profile. */
+  partnerBadge: z.boolean(),
+  /** Listings move back to the top every N days. 0 means off. */
+  autoRefreshDays: z.union(AUTO_REFRESH_DAYS.map((d) => z.literal(d))),
+  /** Shown as "Most chosen" in the plans popup. Only one plan at a time. */
+  recommended: z.boolean(),
   roles: z.array(z.enum(LISTING_ROLES)).min(1),
-  active: z.boolean().default(true),
-  sortOrder: z.number().int().min(0).max(1000).default(0),
+  active: z.boolean(),
+  sortOrder: z.number().int().min(0).max(1000),
+};
+
+export const planSchema = z.object({
+  ...planFields,
+  description: planFields.description.default(''),
+  mrp: planFields.mrp.default(0),
+  featuredListings: planFields.featuredListings.default(0),
+  featuredDays: planFields.featuredDays.default(7),
+  leadLimit: planFields.leadLimit.default(0),
+  searchRank: planFields.searchRank.default(0),
+  partnerBadge: planFields.partnerBadge.default(false),
+  autoRefreshDays: planFields.autoRefreshDays.default(0),
+  recommended: planFields.recommended.default(false),
+  active: planFields.active.default(true),
+  sortOrder: planFields.sortOrder.default(0),
 });
 export type PlanInput = z.input<typeof planSchema>;
-export const planUpdateSchema = planSchema.partial().strict();
+/** No defaults here: a partial update must only change the fields it sends. */
+export const planUpdateSchema = z.object(planFields).partial().strict();
 
 /** Pay to feature one live listing: 7 days (₹49) or 30 days (₹99). */
 export const featureAddonSchema = z.object({
