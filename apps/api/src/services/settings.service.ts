@@ -1,4 +1,10 @@
-import { DEFAULT_HOME_LOAN, siteSettingsSchema, type SiteSettings } from '@nexus/shared';
+import {
+  DEFAULT_FARMS,
+  DEFAULT_HOME_LOAN,
+  farmOn,
+  siteSettingsSchema,
+  type SiteSettings,
+} from '@nexus/shared';
 import { SiteSettings as SiteSettingsModel } from '../models/misc.models.js';
 
 /** Defaults hold only facts the business supplied. Everything else stays empty until approved. */
@@ -26,6 +32,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   invoice: { legalName: '', address: '', state: 'Rajasthan', sacCode: '' },
   enquiryNotificationEmail: undefined,
   homeLoan: { ...DEFAULT_HOME_LOAN, lenders: [] },
+  farms: { ...DEFAULT_FARMS },
 };
 
 let cache: { value: SiteSettings; at: number } | null = null;
@@ -41,6 +48,7 @@ export async function getSettings(): Promise<SiteSettings> {
   merged.homeLoan = { ...DEFAULT_SETTINGS.homeLoan, ...(merged.homeLoan ?? {}) };
   merged.homeLoan.lenders ??= [];
   merged.homeLoan.ratesCheckedAt ??= null;
+  merged.farms = { ...DEFAULT_SETTINGS.farms, ...(merged.farms ?? {}) };
   merged.invoice = { ...DEFAULT_SETTINGS.invoice, ...(merged.invoice ?? {}) };
   cache = { value: merged, at: Date.now() };
   return merged;
@@ -90,11 +98,22 @@ export async function updateSettings(patch: Partial<SiteSettings>): Promise<Site
     social: patch.social ?? current.social,
     featurePrices: { ...current.featurePrices, ...(patch.featurePrices ?? {}) },
     homeLoan: { ...current.homeLoan, ...(patch.homeLoan ?? {}) },
+    farms: { ...current.farms, ...(patch.farms ?? {}) },
     invoice: { ...current.invoice, ...(patch.invoice ?? {}) },
   });
   await SiteSettingsModel.updateOne({ key: 'site' }, { $set: { data: next } }, { upsert: true });
   cache = null;
   return next as SiteSettings;
+}
+
+/** True when admin has switched farm listings off: hide them from every public list and page. */
+export async function farmListingsHidden(): Promise<boolean> {
+  return !farmOn((await getSettings()).farms, 'listings');
+}
+
+/** True when admin has switched off posting new farm listings. */
+export async function farmPostingOff(): Promise<boolean> {
+  return !farmOn((await getSettings()).farms, 'postProperty');
 }
 
 export function clearSettingsCache() {

@@ -7,6 +7,7 @@ import type {
   PreferredTenant,
   PropertyType,
 } from '@nexus/shared';
+import { isFarmType } from '@nexus/shared';
 import { JAIPUR_LANDMARKS } from './landmarks.js';
 import { editDistance, hasDevanagari, phoneticKey, toLatin, typoAllowance } from './text.js';
 
@@ -328,11 +329,19 @@ const TYPE_RULES: [RegExp, PropertyType[], string][] = [
   [/\b(offices?)\b/, ['office', 'coworking'], 'Office'],
   [/\b(warehouse|godown|godam)\b/, ['warehouse'], 'Warehouse'],
   [/\b(factory|shed)\b/, ['factory-shed'], 'Factory / shed'],
+  [/\bfarm ?houses?\b/, ['farmhouse'], 'Farmhouse'],
+  [
+    /\b(farm ?lands?|kheti|khet|khetee|krishi|krishi bhoomi|agricultural land|agri land|agriculture land)\b/,
+    ['farm-land'],
+    'Farm land',
+  ],
+  [/\bfarms?\b/, ['farmhouse', 'farm-land'], 'Farm'],
   [/\bbuilder floor\b/, ['builder-floor'], 'Builder floor'],
   [/\b(villas?|bungalows?)\b/, ['villa'], 'Villa'],
   [/\b(independent house|houses?|kothi|makaa?n|ghar)\b/, ['independent-house', 'villa'], 'House'],
   [/\bstudio\b/, ['studio'], 'Studio'],
-  [/\b(plots?|land|zameen|jameen)\b/, ['plot'], 'Plot'],
+  [/\bplots?\b/, ['plot'], 'Plot'],
+  [/\b(land|zameen|jameen|zamin|jamin)\b/, ['plot', 'farm-land'], 'Plot or land'],
   [/\b(flats?|apartments?)\b/, ['apartment', 'builder-floor', 'studio'], 'Flat'],
   [/\b(rooms?|kamra|kamre|1 ?rk)\b/, ['studio', 'pg', 'apartment'], 'Room'],
   [
@@ -437,6 +446,11 @@ export function parseQuery(input: string, ctx: SearchContext): Intent {
     intent.listingTypeFrom = 'text';
   } else if (intent.types?.[0] === 'pg') {
     intent.listingType = 'rent';
+    intent.listingTypeFrom = 'text';
+  }
+  // Farms are listed for sale only.
+  if (intent.types?.length && intent.types.every((t) => isFarmType(t))) {
+    intent.listingType = 'sale';
     intent.listingTypeFrom = 'text';
   }
 

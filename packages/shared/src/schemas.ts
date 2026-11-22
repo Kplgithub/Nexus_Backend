@@ -47,6 +47,11 @@ import {
   PG_GENDERS,
   PG_SHARING,
   PLOT_APPROVALS,
+  FARM_LAND_USES,
+  FARM_WATER_SOURCES,
+  FARM_ELECTRICITY,
+  FARM_FEATURES,
+  isFarmType,
   POSTED_WITHIN_DAYS,
   PROJECT_STAGES,
   PROJECT_STATUSES,
@@ -187,6 +192,8 @@ export const propertySearchSchema = z
     withPhotos: queryBool,
     rera: queryBool,
     plotApproval: csvList(PLOT_APPROVALS),
+    farmLandUse: csvList(FARM_LAND_USES),
+    farmWater: csvList(FARM_WATER_SOURCES),
     pgGender: queryEnum(PG_GENDERS),
     pgFood: queryBool,
     postedWithin: queryNumber(1, 30).transform((v) =>
@@ -334,6 +341,14 @@ const userPropertyFields = {
   openSides: z.number().int().min(1).max(4).nullable().optional(),
   boundaryWall: z.boolean().default(false),
 
+  // Farms (farmhouse and farm land)
+  farmLandUse: z.enum(FARM_LAND_USES).nullable().optional(),
+  farmWaterSource: z.enum(FARM_WATER_SOURCES).nullable().optional(),
+  farmElectricity: z.enum(FARM_ELECTRICITY).nullable().optional(),
+  farmFeatures: z.array(z.enum(FARM_FEATURES)).max(FARM_FEATURES.length).default([]),
+  /** Built-up area of the house on a farmhouse plot, in sq ft. */
+  farmhouseAreaSqft: count(1_000_000).nullable().optional(),
+
   // PG / hostel
   pgSharing: z.array(z.enum(PG_SHARING)).max(PG_SHARING.length).default([]),
   pgGender: z.enum(PG_GENDERS).nullable().optional(),
@@ -423,6 +438,13 @@ function refineProperty(p: Partial<PropertyBaseInput>, ctx: z.RefinementCtx) {
       code: 'custom',
       path: ['listingType'],
       message: 'A PG can only be listed for rent',
+    });
+  }
+  if (p.propertyType && isFarmType(p.propertyType) && p.listingType === 'rent') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['listingType'],
+      message: 'Farms can only be listed for sale',
     });
   }
   if (p.listingType === 'rent' && p.status === 'sold') {
@@ -861,6 +883,44 @@ export const homeLoanSettingsSchema = z.object({
   exampleRate: z.coerce.number().min(1).max(30).default(8.5),
 });
 
+/** Farm property switches. Each place shows only when the main switch is on too. */
+export const DEFAULT_FARMS = {
+  enabled: true,
+  homepage: true,
+  menu: true,
+  popularSearches: true,
+  filters: true,
+  postProperty: true,
+  listings: true,
+};
+
+export const farmSettingsSchema = z.object({
+  /** Main switch: off hides every farm place on the public site. Listings are kept. */
+  enabled: z.boolean().default(true),
+  /** Farms tab in the home search box, and the Farmhouse and Farm land tiles. */
+  homepage: z.boolean().default(true),
+  /** Buy menu links and the footer link. */
+  menu: z.boolean().default(true),
+  /** Farm links in the home page popular searches. */
+  popularSearches: z.boolean().default(true),
+  /** Farm types and farm filters in search. */
+  filters: z.boolean().default(true),
+  /** Farmhouse and Farm Land in Post Property. */
+  postProperty: z.boolean().default(true),
+  /** Farm listing pages, search results and sitemap. */
+  listings: z.boolean().default(true),
+});
+export type FarmSettings = z.output<typeof farmSettingsSchema>;
+
+/** Is one farm place switched on? The main switch must be on as well. */
+export const farmOn = (
+  farms: Partial<FarmSettings> | null | undefined,
+  place: Exclude<keyof FarmSettings, 'enabled'>,
+): boolean => {
+  const f = { ...DEFAULT_FARMS, ...(farms ?? {}) };
+  return f.enabled && f[place];
+};
+
 /** Indian GST number: 2 digit state code, PAN, entity number, Z, check digit. */
 export const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -953,6 +1013,7 @@ export const siteSettingsSchema = z.object({
     .optional()
     .or(z.literal('').transform(() => undefined)),
   homeLoan: homeLoanSettingsSchema.default(DEFAULT_HOME_LOAN),
+  farms: farmSettingsSchema.default(DEFAULT_FARMS),
 });
 export type SiteSettingsInput = z.input<typeof siteSettingsSchema>;
 export const siteSettingsUpdateSchema = siteSettingsSchema.partial();

@@ -96,6 +96,12 @@ const TYPE_ALIASES: Record<string, PropertyType> = {
   pg: 'pg',
   hostel: 'pg',
   plot: 'plot',
+  farmhouse: 'farmhouse',
+  'farm-house': 'farmhouse',
+  farm: 'farm-land',
+  'farm-land': 'farm-land',
+  farmland: 'farm-land',
+  'agricultural-land': 'farm-land',
   office: 'office',
   shop: 'shop',
   showroom: 'showroom',
@@ -114,6 +120,9 @@ const UNIT_ALIASES: Record<string, (typeof AREA_UNITS)[number]> = {
   gaj: 'sqyd',
   sqm: 'sqm',
   'sq-m': 'sqm',
+  bigha: 'bigha',
+  acre: 'acre',
+  acres: 'acre',
 };
 
 const FURNISHING_ALIASES: Record<string, (typeof FURNISHING_STATUSES)[number]> = {

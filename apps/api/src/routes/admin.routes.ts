@@ -745,6 +745,12 @@ adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
       patch.homeLoan,
       (req.body as { homeLoan?: unknown }).homeLoan,
     ) as typeof patch.homeLoan;
+  // Same for farm switches: flipping one place keeps the others as they were.
+  if (patch.farms)
+    patch.farms = onlySentKeys(
+      patch.farms,
+      (req.body as { farms?: unknown }).farms,
+    ) as typeof patch.farms;
   const s = await updateSettings(patch);
   // The home loan switch and site details show on every page: refresh the website now.
   refreshWebsite('settings');
