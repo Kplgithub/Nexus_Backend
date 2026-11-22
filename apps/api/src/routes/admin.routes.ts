@@ -69,7 +69,7 @@ import * as properties from '../services/property.service.js';
 import * as leads from '../services/enquiry.service.js';
 import * as locations from '../services/location.service.js';
 import * as faqs from '../services/faq.service.js';
-import { getSettings, updateSettings } from '../services/settings.service.js';
+import { getSettings, sectionCounts, updateSettings } from '../services/settings.service.js';
 import { getDashboard } from '../services/dashboard.service.js';
 import { storeImage } from '../services/upload.service.js';
 import { audit } from '../services/support.service.js';
@@ -737,6 +737,9 @@ adminRouter.delete('/blog/:id', requireRole('admin'), async (req, res) => {
 
 adminRouter.get('/settings', async (_req, res) => ok(res, await getSettings()));
 
+/** How many live listings and projects each site section switch would hide. */
+adminRouter.get('/settings/section-counts', async (_req, res) => ok(res, await sectionCounts()));
+
 adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
   const patch = onlySentKeys(parseBody(siteSettingsUpdateSchema, req), req.body);
   // Keep home loan fields that were not sent (e.g. the on/off switch alone keeps the rates).
@@ -745,9 +748,16 @@ adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
       patch.homeLoan,
       (req.body as { homeLoan?: unknown }).homeLoan,
     ) as typeof patch.homeLoan;
+  if (patch.sections)
+    patch.sections = onlySentKeys(
+      patch.sections,
+      (req.body as { sections?: unknown }).sections,
+    ) as typeof patch.sections;
   const s = await updateSettings(patch);
   // The home loan switch and site details show on every page: refresh the website now.
   refreshWebsite('settings');
+  // Site section switches change which listings, projects and profiles are public.
+  if (patch.sections) refreshWebsite('properties', 'projects', 'profiles', 'locations');
   await audit(req.admin, 'update', 'settings', undefined, Object.keys(patch).join(', '));
   ok(res, s);
 });

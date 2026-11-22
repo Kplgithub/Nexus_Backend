@@ -8,6 +8,7 @@ import {
   type PropertyType,
 } from '@nexus/shared';
 import { City } from '../models/misc.models.js';
+import { projectsOn, sectionListingFilter } from './settings.service.js';
 import { Property } from '../models/property.model.js';
 import { Project } from '../models/project.model.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
@@ -103,7 +104,13 @@ function toDto(c: CityLean, counts?: Map<string, number>): CityDto {
 /** Counts of publicly visible listings per city and per city/locality. */
 async function visibleCounts(): Promise<Map<string, number>> {
   const rows = await Property.aggregate<{ _id: { c: string; l: string }; n: number }>([
-    { $match: { status: 'published', listingVisibility: 'public' } },
+    {
+      $match: {
+        status: 'published',
+        listingVisibility: 'public',
+        ...(await sectionListingFilter()),
+      },
+    },
     { $group: { _id: { c: '$citySlug', l: '$localitySlug' }, n: { $sum: 1 } } },
   ]);
   const map = new Map<string, number>();
@@ -275,16 +282,19 @@ export async function getLocalityInsights(
     propertyType: string;
     category: string;
   };
+  const hidden = await sectionListingFilter();
   const [rows, cityRows, projects] = await Promise.all([
-    Property.find({ ...LIVE, citySlug, localitySlug })
+    Property.find({ ...LIVE, ...hidden, citySlug, localitySlug })
       .select('listingType price areaSqft bedrooms propertyType category')
       .limit(5000)
       .lean<Row[]>(),
-    Property.find({ ...LIVE, citySlug, listingType: 'sale', category: 'residential' })
+    Property.find({ ...LIVE, ...hidden, citySlug, listingType: 'sale', category: 'residential' })
       .select('price areaSqft propertyType')
       .limit(20000)
       .lean<Row[]>(),
-    Project.countDocuments({ status: 'published', citySlug, localitySlug }),
+    (await projectsOn())
+      ? Project.countDocuments({ status: 'published', citySlug, localitySlug })
+      : 0,
   ]);
 
   // Plots are priced per area very differently from built homes; keep them out of the rate.

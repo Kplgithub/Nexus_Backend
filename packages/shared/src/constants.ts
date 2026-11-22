@@ -687,3 +687,73 @@ export const SUPPORT_STATUS_LABELS: Record<SupportStatus, string> = {
   resolved: 'Resolved',
 };
 export const SUPPORT_MAX_IMAGES = 3;
+
+/* ------------------------------------------------------------------ */
+/* Site sections (Admin → Settings → Site sections)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Parts of the public site the admin can switch off with one click. Off hides the
+ * section everywhere (menus, home page, search, filters, sitemap, its pages) and hides
+ * its listings without deleting them. To add a section (e.g. farm), add it here, to
+ * SITE_SECTION_INFO, and to listingSections() below.
+ */
+export const SITE_SECTIONS = ['buy', 'rent', 'projects', 'pg', 'plot', 'commercial'] as const;
+export type SiteSection = (typeof SITE_SECTIONS)[number];
+export type SiteSections = Record<SiteSection, boolean>;
+
+export const DEFAULT_SITE_SECTIONS = Object.fromEntries(
+  SITE_SECTIONS.map((s) => [s, true]),
+) as SiteSections;
+
+/** What turning a section off does to its pages: send visitors on, or show "not found". */
+export const SECTION_OFF_ACTIONS = ['redirect', 'not-found'] as const;
+export type SectionOffAction = (typeof SECTION_OFF_ACTIONS)[number];
+
+export const SITE_SECTION_INFO: Record<
+  SiteSection,
+  { label: string; where: string; big?: boolean }
+> = {
+  buy: { label: 'Buy', where: '/buy pages, Buy menu, homepage Buy tab', big: true },
+  rent: { label: 'Rent', where: '/rent pages, Rent menu, homepage Rent tab', big: true },
+  projects: { label: 'New projects', where: '/projects, project pages, homepage projects' },
+  pg: { label: 'PG', where: 'PG search tab, PG filters, PG links' },
+  plot: { label: 'Plots', where: 'Plot search tab, plot filters, plot links' },
+  commercial: { label: 'Commercial', where: '/commercial, Commercial menu, homepage tiles' },
+};
+
+type SectionListing = { category: string; listingType: string; propertyType: string };
+
+/** The switches a listing depends on: it is public only while all of them are on. */
+export function listingSections(p: SectionListing): SiteSection[] {
+  const out: SiteSection[] = [];
+  if (p.category === 'commercial') out.push('commercial');
+  else if (p.category === 'residential') out.push(p.listingType === 'rent' ? 'rent' : 'buy');
+  if (p.propertyType === 'pg') out.push('pg');
+  if (p.propertyType === 'plot') out.push('plot');
+  return out;
+}
+
+/** The first switched-off section a listing belongs to, or null when it is public. */
+export function listingSectionOff(
+  p: SectionListing,
+  on: Partial<SiteSections> | undefined,
+): SiteSection | null {
+  return listingSections(p).find((s) => on?.[s] === false) ?? null;
+}
+
+/**
+ * Database conditions for listings hidden by switched-off sections, for a `$nor`.
+ * Plain objects so the API can pass them straight to MongoDB.
+ */
+export function hiddenListingConditions(
+  on: Partial<SiteSections> | undefined,
+): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  if (on?.buy === false) out.push({ category: 'residential', listingType: 'sale' });
+  if (on?.rent === false) out.push({ category: 'residential', listingType: 'rent' });
+  if (on?.commercial === false) out.push({ category: 'commercial' });
+  if (on?.pg === false) out.push({ propertyType: 'pg' });
+  if (on?.plot === false) out.push({ propertyType: 'plot' });
+  return out;
+}
