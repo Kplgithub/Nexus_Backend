@@ -16,6 +16,10 @@ import {
   PG_GENDERS,
   PG_SHARING,
   PLOT_APPROVALS,
+  FARM_LAND_USES,
+  FARM_WATER_SOURCES,
+  FARM_ELECTRICITY,
+  FARM_FEATURES,
   PREFERRED_TENANTS,
   PROPERTY_STATUSES,
   TRANSACTION_TYPES,
@@ -124,6 +128,12 @@ const propertySchema = new Schema(
     roadWidthFt: { type: Number, min: 0, max: 300, default: null },
     openSides: { type: Number, min: 1, max: 4, default: null },
     boundaryWall: { type: Boolean, default: false },
+
+    farmLandUse: { type: String, enum: [...FARM_LAND_USES, null], default: null },
+    farmWaterSource: { type: String, enum: [...FARM_WATER_SOURCES, null], default: null },
+    farmElectricity: { type: String, enum: [...FARM_ELECTRICITY, null], default: null },
+    farmFeatures: { type: [String], enum: FARM_FEATURES, default: [] },
+    farmhouseAreaSqft: { type: Number, min: 0, max: 1_000_000, default: null },
 
     pgSharing: { type: [String], enum: PG_SHARING, default: [] },
     pgGender: { type: String, enum: [...PG_GENDERS, null], default: null },

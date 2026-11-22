@@ -1,10 +1,10 @@
-import { LISTING_TYPES, AMENITY_LABELS, type PropertyCard } from '@nexus/shared';
+import { LISTING_TYPES, AMENITY_LABELS, isFarmType, type PropertyCard } from '@nexus/shared';
 import { z } from 'zod';
 import type { FilterQuery } from 'mongoose';
 import { Property, type PropertyAttrs } from '../../models/property.model.js';
 import { SearchLog } from '../../models/search-log.model.js';
 import { CARD_FIELDS, VISIBLE, toCard } from '../property.service.js';
-import { sectionListingFilter } from '../settings.service.js';
+import { farmListingsHidden, sectionListingFilter } from '../settings.service.js';
 import { listPublicLocations } from '../location.service.js';
 import { logger } from '../../lib/logger.js';
 import { parseQuery, understoodKeys, type Intent, type PlaceRef, type Point } from './parse.js';
@@ -272,6 +272,7 @@ function candidateFilter(
   i: Intent,
   city: string,
   hidden: FilterQuery<PropertyAttrs>,
+  hideFarms: boolean,
 ): FilterQuery<PropertyAttrs> {
   const f: FilterQuery<PropertyAttrs> = {
     ...VISIBLE,
@@ -279,9 +280,14 @@ function candidateFilter(
     listingType: i.listingType,
     citySlug: city,
   };
-  const t = i.types ?? [];
+  const t = (i.types ?? []).filter((x) => !hideFarms || !isFarmType(x));
   if (t.includes('pg') && t.length === 1) f.propertyType = 'pg';
-  else if (t.includes('plot')) f.propertyType = { $in: ['plot', 'industrial-land'] };
+  else if (t.length && t.every((x) => isFarmType(x))) f.propertyType = { $in: t };
+  else if (t.includes('plot'))
+    f.propertyType = {
+      $in: ['plot', 'industrial-land', ...t.filter((x) => isFarmType(x))],
+    };
+  else if (hideFarms && (i.types ?? []).length && !t.length) f.propertyType = { $in: [] };
   else if (
     t.some((x) =>
       ['office', 'shop', 'showroom', 'coworking', 'warehouse', 'factory-shed'].includes(x),
@@ -318,7 +324,10 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
   const keys = understoodKeys(intent);
   const understood = keys.length > 0;
 
-  const rows = await Property.find(candidateFilter(intent, city.slug, await sectionListingFilter()))
+  const hideFarms = await farmListingsHidden();
+  const rows = await Property.find(
+    candidateFilter(intent, city.slug, await sectionListingFilter(), hideFarms),
+  )
     .select(MATCH_FIELDS)
     .sort({ featured: -1, boostRank: -1, refreshedAt: -1, publishedAt: -1 })
     .limit(CANDIDATE_LIMIT)

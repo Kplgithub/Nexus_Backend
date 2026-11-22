@@ -27,6 +27,10 @@ import type {
   PgGender,
   PgSharing,
   PlotApproval,
+  FarmLandUse,
+  FarmWaterSource,
+  FarmElectricity,
+  FarmFeature,
   ProjectStage,
   ProjectStatus,
   ProjectUnitType,
@@ -46,7 +50,7 @@ import type {
   UserRole,
   UserStatus,
 } from './constants.js';
-import type { LoanLender } from './schemas.js';
+import type { FarmSettings, LoanLender } from './schemas.js';
 
 /** Envelope used by every API response. */
 export type ApiSuccess<T> = { ok: true; data: T; meta?: PaginationMeta };
@@ -148,6 +152,11 @@ export type PublicProperty = {
   roadWidthFt: number | null;
   openSides: number | null;
   boundaryWall: boolean;
+  farmLandUse: FarmLandUse | null;
+  farmWaterSource: FarmWaterSource | null;
+  farmElectricity: FarmElectricity | null;
+  farmFeatures: FarmFeature[];
+  farmhouseAreaSqft: number | null;
   pgSharing: PgSharing[];
   pgGender: PgGender | null;
   pgFoodIncluded: boolean;
@@ -192,6 +201,9 @@ export type PropertyCard = Pick<
   | 'publishedAt'
   | 'location'
   | 'plotApproval'
+  | 'farmLandUse'
+  | 'farmWaterSource'
+  | 'farmhouseAreaSqft'
   | 'pgGender'
 > & {
   posterType: PosterType;
@@ -363,6 +375,8 @@ export type SiteSettings = {
     ratesCheckedAt: string | null;
     exampleRate: number;
   };
+  /** Farm property switches (main switch plus one per place on the site). */
+  farms: FarmSettings;
   /** Which parts of the public site are on. Off hides pages, links and listings. */
   sections: SiteSections;
   sectionOffAction: SectionOffAction;

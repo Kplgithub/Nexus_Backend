@@ -1,6 +1,8 @@
 import {
+  DEFAULT_FARMS,
   DEFAULT_HOME_LOAN,
   DEFAULT_SITE_SECTIONS,
+  farmOn,
   hiddenListingConditions,
   siteSettingsSchema,
   type SiteSection,
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   invoice: { legalName: '', address: '', state: 'Rajasthan', sacCode: '' },
   enquiryNotificationEmail: undefined,
   homeLoan: { ...DEFAULT_HOME_LOAN, lenders: [] },
+  farms: { ...DEFAULT_FARMS },
   sections: { ...DEFAULT_SITE_SECTIONS },
   sectionOffAction: 'redirect',
 };
@@ -52,6 +55,7 @@ export async function getSettings(): Promise<SiteSettings> {
   merged.homeLoan = { ...DEFAULT_SETTINGS.homeLoan, ...(merged.homeLoan ?? {}) };
   merged.homeLoan.lenders ??= [];
   merged.homeLoan.ratesCheckedAt ??= null;
+  merged.farms = { ...DEFAULT_SETTINGS.farms, ...(merged.farms ?? {}) };
   merged.invoice = { ...DEFAULT_SETTINGS.invoice, ...(merged.invoice ?? {}) };
   merged.sections = { ...DEFAULT_SITE_SECTIONS, ...(merged.sections ?? {}) };
   merged.sectionOffAction ??= 'redirect';
@@ -103,12 +107,23 @@ export async function updateSettings(patch: Partial<SiteSettings>): Promise<Site
     social: patch.social ?? current.social,
     featurePrices: { ...current.featurePrices, ...(patch.featurePrices ?? {}) },
     homeLoan: { ...current.homeLoan, ...(patch.homeLoan ?? {}) },
+    farms: { ...current.farms, ...(patch.farms ?? {}) },
     invoice: { ...current.invoice, ...(patch.invoice ?? {}) },
     sections: { ...current.sections, ...(patch.sections ?? {}) },
   });
   await SiteSettingsModel.updateOne({ key: 'site' }, { $set: { data: next } }, { upsert: true });
   cache = null;
   return next as SiteSettings;
+}
+
+/** True when admin has switched farm listings off: hide them from every public list and page. */
+export async function farmListingsHidden(): Promise<boolean> {
+  return !farmOn((await getSettings()).farms, 'listings');
+}
+
+/** True when admin has switched off posting new farm listings. */
+export async function farmPostingOff(): Promise<boolean> {
+  return !farmOn((await getSettings()).farms, 'postProperty');
 }
 
 export function clearSettingsCache() {

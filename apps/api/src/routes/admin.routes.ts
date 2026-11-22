@@ -748,6 +748,12 @@ adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
       patch.homeLoan,
       (req.body as { homeLoan?: unknown }).homeLoan,
     ) as typeof patch.homeLoan;
+  // Same for farm and site section switches: flipping one keeps the others as they were.
+  if (patch.farms)
+    patch.farms = onlySentKeys(
+      patch.farms,
+      (req.body as { farms?: unknown }).farms,
+    ) as typeof patch.farms;
   if (patch.sections)
     patch.sections = onlySentKeys(
       patch.sections,
@@ -758,6 +764,8 @@ adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
   refreshWebsite('settings');
   // Site section switches change which listings, projects and profiles are public.
   if (patch.sections) refreshWebsite('properties', 'projects', 'profiles', 'locations');
+  // The farm switch hides or shows farm listings.
+  else if (patch.farms) refreshWebsite('properties');
   await audit(req.admin, 'update', 'settings', undefined, Object.keys(patch).join(', '));
   ok(res, s);
 });

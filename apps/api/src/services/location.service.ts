@@ -1,4 +1,5 @@
 import {
+  isFarmType,
   median,
   slugify,
   type City as CityDto,
@@ -297,10 +298,10 @@ export async function getLocalityInsights(
       : 0,
   ]);
 
-  // Plots are priced per area very differently from built homes; keep them out of the rate.
+  // Plots and farms are priced per area very differently from built homes; keep them out of the rate.
   const ppsf = (list: Row[]) =>
     list
-      .filter((r) => r.areaSqft > 0 && r.propertyType !== 'plot')
+      .filter((r) => r.areaSqft > 0 && r.propertyType !== 'plot' && !isFarmType(r.propertyType))
       .map((r) => Math.round(r.price / r.areaSqft));
   const sale = rows.filter((r) => r.listingType === 'sale');
   const rent = rows.filter((r) => r.listingType === 'rent');

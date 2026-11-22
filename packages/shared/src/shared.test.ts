@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_FARMS,
+  farmOn,
+  pricePerLandUnit,
   coverFirst,
   enquiryCreateSchema,
   formatPrice,
@@ -232,5 +235,34 @@ describe('coverFirst', () => {
     expect(coverFirst(['a', 'b'], undefined)).toEqual(['a', 'b']);
     expect(coverFirst(['a', 'b'], 5)).toEqual(['a', 'b']);
     expect(coverFirst([], 3)).toEqual([]);
+  });
+});
+
+describe('farms', () => {
+  it('converts bigha and acre to sq ft (pakka bigha = 3,025 sq yd)', () => {
+    expect(toSqft(1, 'bigha')).toBe(27_225);
+    expect(toSqft(2, 'acre')).toBe(87_120);
+  });
+
+  it('prices farms per bigha or acre only', () => {
+    expect(pricePerLandUnit(12_500_000, 2, 'bigha')).toEqual({ amount: 6_250_000, unit: 'bigha' });
+    expect(pricePerLandUnit(5_000_000, 1000, 'sqft')).toBeNull();
+  });
+
+  it('needs the main switch and the place switch', () => {
+    expect(farmOn(undefined, 'homepage')).toBe(true);
+    expect(farmOn({ ...DEFAULT_FARMS, enabled: false }, 'homepage')).toBe(false);
+    expect(farmOn({ ...DEFAULT_FARMS, menu: false }, 'menu')).toBe(false);
+    expect(farmOn({ ...DEFAULT_FARMS, menu: false }, 'homepage')).toBe(true);
+  });
+
+  it('accepts farm search filters', () => {
+    const q = propertySearchSchema.parse({
+      propertyType: 'farmhouse,farm-land',
+      farmLandUse: 'converted',
+      farmWater: 'borewell,canal',
+    });
+    expect(q.propertyType).toEqual(['farmhouse', 'farm-land']);
+    expect(q.farmWater).toEqual(['borewell', 'canal']);
   });
 });

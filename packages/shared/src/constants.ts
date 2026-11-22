@@ -10,7 +10,17 @@ export type Category = (typeof CATEGORIES)[number];
 export const ACTIVE_CATEGORIES: readonly Category[] = ['residential', 'commercial'];
 
 export const PROPERTY_TYPES = {
-  residential: ['apartment', 'independent-house', 'builder-floor', 'villa', 'studio', 'pg', 'plot'],
+  residential: [
+    'apartment',
+    'independent-house',
+    'builder-floor',
+    'villa',
+    'studio',
+    'pg',
+    'plot',
+    'farmhouse',
+    'farm-land',
+  ],
   commercial: [
     'office',
     'shop',
@@ -40,6 +50,8 @@ export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   villa: 'Villa / Bungalow',
   studio: 'Studio Apartment',
   plot: 'Residential Plot',
+  farmhouse: 'Farmhouse',
+  'farm-land': 'Farm Land',
   pg: 'PG / Shared Accommodation',
   office: 'Office Space',
   shop: 'Retail Shop',
@@ -140,20 +152,29 @@ export const FURNISHING_LABELS: Record<FurnishingStatus, string> = {
   furnished: 'Fully furnished',
 };
 
-export const AREA_UNITS = ['sqft', 'sqyd', 'sqm'] as const;
+export const AREA_UNITS = ['sqft', 'sqyd', 'sqm', 'bigha', 'acre'] as const;
 export type AreaUnit = (typeof AREA_UNITS)[number];
 
 export const AREA_UNIT_LABELS: Record<AreaUnit, string> = {
   sqft: 'sq ft',
   sqyd: 'sq yd',
   sqm: 'sq m',
+  bigha: 'bigha',
+  acre: 'acre',
 };
+
+/** Units for land area; farms are measured in these. */
+export const LAND_AREA_UNITS = ['bigha', 'acre'] as const satisfies readonly AreaUnit[];
+export type LandAreaUnit = (typeof LAND_AREA_UNITS)[number];
 
 /** Conversion factors to square feet, used to normalise area for filtering. */
 export const AREA_TO_SQFT: Record<AreaUnit, number> = {
   sqft: 1,
   sqyd: 9,
   sqm: 10.7639,
+  /** Jaipur pakka bigha: 3,025 sq yd. */
+  bigha: 27_225,
+  acre: 43_560,
 };
 
 export const AREA_TYPES = ['carpet', 'built-up', 'super-built-up', 'plot'] as const;
@@ -220,6 +241,60 @@ export const AMENITY_LABELS: Record<Amenity, string> = {
   reception: 'Reception area',
   'servant-room': 'Servant room',
   'pet-friendly': 'Pet friendly',
+};
+
+/* ---------------- Farms ---------------- */
+
+/** Farmhouses and farm land. Listed for sale only, and switchable from admin Settings. */
+export const FARM_TYPES = ['farmhouse', 'farm-land'] as const;
+export type FarmType = (typeof FARM_TYPES)[number];
+export const isFarmType = (t: string | null | undefined): t is FarmType =>
+  (FARM_TYPES as readonly string[]).includes(t ?? '');
+
+export const FARM_LAND_USES = ['agricultural', 'converted', 'jda-scheme', 'unknown'] as const;
+export type FarmLandUse = (typeof FARM_LAND_USES)[number];
+export const FARM_LAND_USE_LABELS: Record<FarmLandUse, string> = {
+  agricultural: 'Agricultural',
+  converted: 'Converted (90-A)',
+  'jda-scheme': 'JDA approved scheme',
+  unknown: 'Not sure',
+};
+
+export const FARM_WATER_SOURCES = ['borewell', 'canal', 'well', 'tanker', 'none'] as const;
+export type FarmWaterSource = (typeof FARM_WATER_SOURCES)[number];
+export const FARM_WATER_SOURCE_LABELS: Record<FarmWaterSource, string> = {
+  borewell: 'Borewell',
+  canal: 'Canal',
+  well: 'Well',
+  tanker: 'Tanker',
+  none: 'None',
+};
+
+export const FARM_ELECTRICITY = ['agricultural', 'domestic', 'solar', 'none'] as const;
+export type FarmElectricity = (typeof FARM_ELECTRICITY)[number];
+export const FARM_ELECTRICITY_LABELS: Record<FarmElectricity, string> = {
+  agricultural: 'Agricultural connection',
+  domestic: 'Domestic connection',
+  solar: 'Solar',
+  none: 'None',
+};
+
+export const FARM_FEATURES = [
+  'main-gate',
+  'fruit-trees',
+  'lawn',
+  'swimming-pool',
+  'caretaker-room',
+  'cattle-shed',
+] as const;
+export type FarmFeature = (typeof FARM_FEATURES)[number];
+export const FARM_FEATURE_LABELS: Record<FarmFeature, string> = {
+  'main-gate': 'Main gate',
+  'fruit-trees': 'Fruit trees',
+  lawn: 'Lawn',
+  'swimming-pool': 'Swimming pool',
+  'caretaker-room': 'Caretaker room',
+  'cattle-shed': 'Cattle shed',
 };
 
 /* ---------------- Plots and PG ---------------- */

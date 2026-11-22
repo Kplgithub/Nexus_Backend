@@ -1,7 +1,9 @@
 import type { FilterQuery, SortOrder } from 'mongoose';
 import { Types } from 'mongoose';
 import {
+  FARM_TYPES,
   PUBLIC_DETAIL_STATUSES,
+  isFarmType,
   listingSectionOff,
   SITE_SECTION_INFO,
   type SiteSection,
@@ -54,7 +56,12 @@ import { escapeRegex, paginate } from '../lib/respond.js';
 import { env } from '../config/env.js';
 import { resolveLocation } from './location.service.js';
 import { deleteImages } from './upload.service.js';
-import { getSettings, sectionListingFilter } from './settings.service.js';
+import {
+  farmListingsHidden,
+  farmPostingOff,
+  getSettings,
+  sectionListingFilter,
+} from './settings.service.js';
 import { sendMail } from './mail.service.js';
 
 type Lean = PropertyAttrs & { _id: Types.ObjectId; createdAt: Date; updatedAt: Date };
@@ -93,7 +100,13 @@ export function toGeo(p: { lat: number; lng: number } | null | undefined) {
   return p ? { type: 'Point', coordinates: [p.lng, p.lat] } : undefined;
 }
 
-const PLOT_TYPES = ['plot', 'industrial-land'];
+/** Types that carry plot fields (approval, road width, open sides, boundary wall). */
+const PLOT_TYPES = ['plot', 'industrial-land', ...FARM_TYPES];
+
+/** Hides farm listings while admin has them switched off. Merge into a public filter. */
+export async function farmFilter(): Promise<FilterQuery<PropertyAttrs>> {
+  return (await farmListingsHidden()) ? { propertyType: { $nin: [...FARM_TYPES] } } : {};
+}
 
 const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
@@ -208,6 +221,11 @@ function core(p: Lean): ListingCore {
     roadWidthFt: p.roadWidthFt ?? null,
     openSides: p.openSides ?? null,
     boundaryWall: p.boundaryWall ?? false,
+    farmLandUse: (p.farmLandUse as PublicProperty['farmLandUse']) ?? null,
+    farmWaterSource: (p.farmWaterSource as PublicProperty['farmWaterSource']) ?? null,
+    farmElectricity: (p.farmElectricity as PublicProperty['farmElectricity']) ?? null,
+    farmFeatures: (p.farmFeatures ?? []) as PublicProperty['farmFeatures'],
+    farmhouseAreaSqft: p.farmhouseAreaSqft ?? null,
     pgSharing: (p.pgSharing ?? []) as PublicProperty['pgSharing'],
     pgGender: (p.pgGender as PublicProperty['pgGender']) ?? null,
     pgFoodIncluded: p.pgFoodIncluded ?? false,
@@ -261,6 +279,9 @@ export function toCard(p: Lean): PropertyCard {
     areaSqft: c.areaSqft,
     location: c.location,
     plotApproval: c.plotApproval,
+    farmLandUse: c.farmLandUse,
+    farmWaterSource: c.farmWaterSource,
+    farmhouseAreaSqft: c.farmhouseAreaSqft,
     pgGender: c.pgGender,
     partnerBadge: p.partnerBadge ?? false,
     refreshedAt: iso(p.refreshedAt ?? p.publishedAt),
@@ -337,18 +358,25 @@ async function enquiryCounts(ids: Types.ObjectId[]) {
 /* ------------------------------------------------------------------ */
 
 export const CARD_FIELDS =
-  'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType geo plotApproval pgGender partnerBadge refreshedAt';
+  'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType geo plotApproval farmLandUse farmWaterSource farmhouseAreaSqft pgGender partnerBadge refreshedAt';
 
 export const VISIBLE = { status: 'published', listingVisibility: 'public' } as const;
 
 export function buildPublicFilter(
   q: PropertySearch,
   projectId?: Types.ObjectId | null,
+  hideFarms = false,
 ): FilterQuery<PropertyAttrs> {
   const f: FilterQuery<PropertyAttrs> = { ...VISIBLE };
   if (q.listingType) f.listingType = q.listingType;
   if (q.category) f.category = q.category;
-  if (q.propertyType?.length) f.propertyType = { $in: q.propertyType };
+  if (q.propertyType?.length) {
+    f.propertyType = {
+      $in: hideFarms ? q.propertyType.filter((t) => !isFarmType(t)) : q.propertyType,
+    };
+  } else if (hideFarms) {
+    f.propertyType = { $nin: [...FARM_TYPES] };
+  }
   if (q.city) f.citySlug = q.city;
   if (q.locality) f.localitySlug = q.locality;
   if (q.minPrice !== undefined || q.maxPrice !== undefined) {
@@ -377,6 +405,8 @@ export function buildPublicFilter(
   if (q.withPhotos) f['images.0'] = { $exists: true };
   if (q.rera) f.reraId = { $nin: [null, ''], $exists: true };
   if (q.plotApproval?.length) f.plotApproval = { $in: q.plotApproval };
+  if (q.farmLandUse?.length) f.farmLandUse = { $in: q.farmLandUse };
+  if (q.farmWater?.length) f.farmWaterSource = { $in: q.farmWater };
   if (q.pgGender) f.pgGender = { $in: [q.pgGender, 'any'] };
   if (q.pgFood) f.pgFoodIncluded = true;
   if (q.postedWithin) f.publishedAt = { $gte: new Date(Date.now() - q.postedWithin * 86_400_000) };
@@ -401,7 +431,7 @@ export async function searchPublic(
         ?._id ?? null)
     : null;
   const filter = {
-    ...buildPublicFilter(q, projectId as Types.ObjectId | null),
+    ...buildPublicFilter(q, projectId as Types.ObjectId | null, await farmListingsHidden()),
     ...(await sectionListingFilter()),
   };
   const [rows, total] = await Promise.all([
@@ -423,7 +453,11 @@ export type PublicDetailResult =
   | { kind: 'off'; section: SiteSection };
 
 export async function getPublicBySlug(slug: string): Promise<PublicDetailResult> {
-  const p = await Property.findOne({ slug, status: { $in: PUBLIC_DETAIL_STATUSES } }).lean<Lean>();
+  const p = await Property.findOne({
+    slug,
+    status: { $in: PUBLIC_DETAIL_STATUSES },
+    ...(await farmFilter()),
+  }).lean<Lean>();
   if (p) {
     const { sections } = await getSettings();
     const off = listingSectionOff(p, sections);
@@ -456,6 +490,7 @@ export async function getPublicBySlug(slug: string): Promise<PublicDetailResult>
 async function findSimilar(p: Lean, limit = 4): Promise<PropertyCard[]> {
   const base: FilterQuery<PropertyAttrs> = {
     ...VISIBLE,
+    ...(await farmFilter()),
     ...(await sectionListingFilter()),
     _id: { $ne: p._id },
     listingType: p.listingType,
@@ -486,7 +521,7 @@ async function findSimilar(p: Lean, limit = 4): Promise<PropertyCard[]> {
 
 /** Home page rails; `citySlug` limits every rail and count to one city. */
 export async function listHomeSections(citySlug?: string) {
-  const hidden = await sectionListingFilter();
+  const hidden = { ...(await sectionListingFilter()), ...(await farmFilter()) };
   const base = citySlug ? { ...VISIBLE, ...hidden, citySlug } : { ...VISIBLE, ...hidden };
   const [featured, recentSale, recentRent, counts] = await Promise.all([
     Property.find({ ...base, featured: true })
@@ -538,6 +573,7 @@ export async function sitemapEntries() {
   const rows = await Property.find({
     ...VISIBLE,
     ...(await sectionListingFilter()),
+    ...(await farmFilter()),
     isDemo: { $ne: true },
   })
     .select('slug updatedAt')
@@ -611,6 +647,20 @@ function normaliseExtras<T extends Record<string, unknown>>(data: T, propertyTyp
       openSides: null,
       boundaryWall: false,
     });
+  }
+  if (propertyType && !isFarmType(propertyType)) {
+    Object.assign(out, {
+      farmLandUse: null,
+      farmWaterSource: null,
+      farmElectricity: null,
+      farmFeatures: [],
+      farmhouseAreaSqft: null,
+    });
+  }
+  if (propertyType && propertyType !== 'farmhouse') out.farmhouseAreaSqft = null;
+  if (propertyType && isFarmType(propertyType)) {
+    // Farms use land use instead of a plot approval, and are not corner plots.
+    Object.assign(out, { cornerPlot: false, plotApproval: null });
   }
   if (propertyType && propertyType !== 'pg') {
     Object.assign(out, { pgSharing: [], pgGender: null, pgFoodIncluded: false });
@@ -969,6 +1019,9 @@ export async function createMine(
   user: { id: string; role: UserRole },
   input: UserPropertyCreate,
 ): Promise<OwnListing> {
+  if (isFarmType(input.propertyType) && (await farmPostingOff())) {
+    throw badRequest('Farm listings are not open right now.');
+  }
   await assertSectionOpen(input);
   const loc = await resolveLocation(input.citySlug, input.localitySlug, { activeOnly: true });
   await checkProject(input.projectId, input.citySlug);

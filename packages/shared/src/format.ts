@@ -39,6 +39,19 @@ export function formatArea(value: number, unit: AreaUnit): string {
   return `${new Intl.NumberFormat('en-IN').format(value)} ${AREA_UNIT_LABELS[unit]}`;
 }
 
+/**
+ * Farms are priced per bigha or acre, not per sq ft. Returns the price for one
+ * unit of land when the listing's area is in bigha or acre, otherwise null.
+ */
+export function pricePerLandUnit(
+  price: number,
+  areaValue: number,
+  unit: AreaUnit,
+): { amount: number; unit: 'bigha' | 'acre' } | null {
+  if ((unit !== 'bigha' && unit !== 'acre') || !(areaValue > 0) || !(price > 0)) return null;
+  return { amount: Math.round(price / areaValue), unit };
+}
+
 export function toSqft(value: number, unit: AreaUnit): number {
   return Math.round(value * AREA_TO_SQFT[unit]);
 }
