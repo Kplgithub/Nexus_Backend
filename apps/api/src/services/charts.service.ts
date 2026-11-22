@@ -4,7 +4,7 @@ import { Property } from '../models/property.model.js';
 import { Project } from '../models/project.model.js';
 import { Admin, Enquiry, Report } from '../models/misc.models.js';
 import { User } from '../models/user.model.js';
-import { AdminNotification, SiteVisit } from '../models/admin-panel.models.js';
+import { AdminNotification, SiteVisit, SupportTicket } from '../models/admin-panel.models.js';
 import { adminRef, recentActivity } from './team.service.js';
 
 const DAY = 86_400_000;
@@ -253,7 +253,7 @@ export async function getCharts(days: number, includeActivity: boolean): Promise
 
 /** Numbers on the sidebar: work waiting in each queue. */
 export async function getBadges(adminId: string) {
-  const [review, projects, leads, reports, verification, unread] = await Promise.all([
+  const [review, projects, leads, reports, verification, support, unread] = await Promise.all([
     Property.countDocuments({ status: 'pending' }),
     Project.countDocuments({ status: 'pending' }),
     Enquiry.countDocuments({ status: 'new' }),
@@ -263,7 +263,8 @@ export async function getBadges(adminId: string) {
       status: 'active',
       verificationStatus: { $in: ['unverified', 'pending'] },
     }),
+    SupportTicket.countDocuments({ status: 'open' }),
     AdminNotification.countDocuments({ admin: adminId, read: false }),
   ]);
-  return { review, projects, leads, reports, verification, unread };
+  return { review, projects, leads, reports, verification, support, unread };
 }

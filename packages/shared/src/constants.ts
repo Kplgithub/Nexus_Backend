@@ -604,7 +604,15 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export const PAYMENT_METHODS = ['online', 'manual'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-export const ALERT_EVENTS = ['lead', 'listing', 'report', 'signup', 'payment', 'visit'] as const;
+export const ALERT_EVENTS = [
+  'lead',
+  'listing',
+  'report',
+  'signup',
+  'payment',
+  'visit',
+  'support',
+] as const;
 export type AlertEvent = (typeof ALERT_EVENTS)[number];
 export const ALERT_EVENT_LABELS: Record<AlertEvent, string> = {
   lead: 'New enquiry',
@@ -613,4 +621,34 @@ export const ALERT_EVENT_LABELS: Record<AlertEvent, string> = {
   signup: 'New agent or builder signed up',
   payment: 'Payment received',
   visit: 'Site visit booked',
+  support: 'New support request',
 };
+
+/* ---------------- Help & support ---------------- */
+
+export const SUPPORT_TOPICS = [
+  'listing',
+  'payment',
+  'account',
+  'leads',
+  'report',
+  'other',
+] as const;
+export type SupportTopic = (typeof SUPPORT_TOPICS)[number];
+export const SUPPORT_TOPIC_LABELS: Record<SupportTopic, string> = {
+  listing: 'Listing / property',
+  payment: 'Payment / plan',
+  account: 'Login / account',
+  leads: 'Leads / enquiry',
+  report: 'Report fake listing or person',
+  other: 'Something else',
+};
+
+export const SUPPORT_STATUSES = ['open', 'in-progress', 'resolved'] as const;
+export type SupportStatus = (typeof SUPPORT_STATUSES)[number];
+export const SUPPORT_STATUS_LABELS: Record<SupportStatus, string> = {
+  open: 'Open',
+  'in-progress': 'In progress',
+  resolved: 'Resolved',
+};
+export const SUPPORT_MAX_IMAGES = 3;

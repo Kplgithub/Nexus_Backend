@@ -4,6 +4,8 @@ import multer from 'multer';
 import {
   IMAGE_MAX_BYTES,
   adminEnquiryQuerySchema,
+  adminSupportQuerySchema,
+  adminSupportReplySchema,
   adminUserQuerySchema,
   adminUserUpdateSchema,
   adminPropertyQuerySchema,
@@ -52,6 +54,7 @@ import {
 import { getBadges, getCharts } from '../services/charts.service.js';
 import * as team from '../services/team.service.js';
 import * as visits from '../services/site-visit.service.js';
+import * as tickets from '../services/ticket.service.js';
 import * as billing from '../services/billing.service.js';
 import * as featured from '../services/featured.service.js';
 import * as alerts from '../services/notification.service.js';
@@ -492,6 +495,37 @@ adminRouter.delete('/visits/:id', requireRole('admin'), async (req, res) => {
   const v = await visits.deleteVisit(id);
   await audit(req.admin, 'delete', 'visit', id, v.name);
   ok(res, { deleted: true });
+});
+
+/* ---------------- Help & support tickets ---------------- */
+
+adminRouter.get('/support', async (req, res) => {
+  const { items, meta, counts } = await tickets.listForAdmin(
+    parseQuery(adminSupportQuerySchema, req),
+  );
+  ok(res, { items, counts }, meta);
+});
+
+adminRouter.get('/support/:id', async (req, res) => {
+  ok(res, await tickets.getForAdmin(parseId(req)));
+});
+
+adminRouter.post('/support/:id/reply', async (req, res) => {
+  const id = parseId(req);
+  const { ticket, changes } = await tickets.replyAsAdmin(
+    id,
+    parseBody(adminSupportReplySchema, req),
+    req.admin!,
+  );
+  if (changes.length)
+    await audit(
+      req.admin,
+      changes.includes('reply') ? 'reply' : 'status',
+      'support',
+      id,
+      `${ticket.ticketId} ${ticket.user.name} (${ticket.status})`,
+    );
+  ok(res, ticket);
 });
 
 /* ---------------- Agent & builder verification ---------------- */

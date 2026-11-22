@@ -4,6 +4,8 @@ import {
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
   SITE_VISIT_STATUSES,
+  SUPPORT_STATUSES,
+  SUPPORT_TOPICS,
   USER_ROLES,
 } from '@nexus/shared';
 
@@ -121,3 +123,47 @@ notificationSchema.index({ admin: 1, read: 1, createdAt: -1 });
 // Old notifications clear themselves after 90 days.
 notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 3600 });
 export const AdminNotification = model('AdminNotification', notificationSchema);
+
+/* ---------------- Help & support tickets ---------------- */
+const supportMessageSchema = new Schema(
+  {
+    from: { type: String, enum: ['user', 'admin'], required: true },
+    by: { type: String, required: true, maxlength: 120 },
+    admin: { type: Schema.Types.ObjectId, ref: 'Admin', default: null },
+    text: { type: String, maxlength: 2000, default: '' },
+    images: { type: [String], default: [] },
+    at: { type: Date, default: () => new Date() },
+  },
+  { _id: false },
+);
+
+const supportTicketSchema = new Schema(
+  {
+    ticketId: { type: String, required: true, unique: true },
+    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    /** Role at the time the ticket was raised; drives the admin role tabs. */
+    role: { type: String, enum: USER_ROLES, required: true },
+    userSnapshot: {
+      name: String,
+      phone: String,
+      companyName: { type: String, default: null },
+    },
+    topic: { type: String, enum: [...SUPPORT_TOPICS, null], default: null },
+    subject: { type: String, required: true, maxlength: 160 },
+    property: { type: Schema.Types.ObjectId, ref: 'Property', default: null },
+    propertySnapshot: { title: String, slug: String },
+    status: { type: String, enum: SUPPORT_STATUSES, default: 'open' },
+    messages: { type: [supportMessageSchema], default: [] },
+    lastMessageAt: { type: Date, default: () => new Date() },
+    firstReplyAt: { type: Date, default: null },
+    resolvedAt: { type: Date, default: null },
+    /** A team reply the user has not opened yet. */
+    userUnread: { type: Boolean, default: false },
+    /** A user message the team has not opened yet. */
+    adminUnread: { type: Boolean, default: true },
+  },
+  { timestamps: true },
+);
+supportTicketSchema.index({ user: 1, lastMessageAt: -1 });
+supportTicketSchema.index({ status: 1, role: 1, lastMessageAt: -1 });
+export const SupportTicket = model('SupportTicket', supportTicketSchema);

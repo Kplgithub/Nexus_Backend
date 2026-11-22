@@ -3,7 +3,7 @@ import { logger } from '../lib/logger.js';
 import type { AuthedAdmin } from '../middleware/auth.js';
 
 /** Atomically allocate a human-readable lead id like "NX-E-2026-00042". */
-export async function nextLeadId(prefix: 'E' | 'L'): Promise<string> {
+export async function nextLeadId(prefix: 'E' | 'L' | 'S'): Promise<string> {
   const year = new Date().getFullYear();
   const key = `${prefix}-${year}`;
   const c = await Counter.findOneAndUpdate(

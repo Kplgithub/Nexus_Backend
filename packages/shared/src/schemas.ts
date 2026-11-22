@@ -23,6 +23,9 @@ import {
   POSSESSION_STATUSES,
   TRANSACTION_TYPES,
   USER_ROLES,
+  SUPPORT_MAX_IMAGES,
+  SUPPORT_STATUSES,
+  SUPPORT_TOPICS,
   LISTING_ROLES,
   USER_SETTABLE_STATUSES,
   USER_STATUSES,
@@ -1305,4 +1308,61 @@ export const alertSettingsUpdateSchema = alertSettingsSchema.partial();
 export const notificationReadSchema = z.object({
   ids: z.array(objectIdSchema).max(200).optional(),
   all: z.boolean().optional(),
+});
+
+/* ---------------- Help & support ---------------- */
+
+const supportImages = z
+  .array(
+    // Uploaded image URLs: full https links (Cloudinary) or local /uploads/ paths.
+    z
+      .string()
+      .trim()
+      .max(1000)
+      .regex(/^(https?:\/\/|\/uploads\/)[^\s"'<>]+$/, 'Invalid image'),
+  )
+  .max(SUPPORT_MAX_IMAGES)
+  .default([]);
+
+export const supportTicketCreateSchema = z
+  .object({
+    topic: z.enum(SUPPORT_TOPICS).nullable().optional(),
+    message: plainText(0, 2000).optional().default(''),
+    propertyId: objectIdSchema.nullable().optional(),
+    images: supportImages,
+  })
+  .refine((v) => Boolean(v.topic) || v.message.length >= 5, {
+    message: 'Choose a topic or write at least a few words',
+    path: ['message'],
+  });
+export type SupportTicketCreateInput = z.input<typeof supportTicketCreateSchema>;
+
+export const supportReplySchema = z.object({
+  message: plainText(1, 2000),
+  images: supportImages,
+});
+
+export const adminSupportReplySchema = z
+  .object({
+    message: plainText(0, 2000).optional().default(''),
+    status: z.enum(SUPPORT_STATUSES).optional(),
+  })
+  .refine((v) => v.message.length > 0 || Boolean(v.status), {
+    message: 'Write a reply or change the status',
+    path: ['message'],
+  });
+
+export const adminSupportQuerySchema = z.object({
+  role: queryEnum(USER_ROLES),
+  status: queryEnum(SUPPORT_STATUSES),
+  topic: queryEnum(SUPPORT_TOPICS),
+  q: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
+    .catch(undefined)
+    .transform((v) => v || undefined),
+  page: queryNumber(1, 10_000).transform((v) => v ?? 1),
+  limit: queryNumber(1, 100).transform((v) => v ?? 30),
 });
