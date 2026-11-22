@@ -30,6 +30,8 @@ import {
   activeListingCount,
   claimListingSlot,
   currentPlanListingLimit,
+  listingPerksFor,
+  syncPlanPerksFor,
 } from './billing.service.js';
 import { businessAlert } from './notification.service.js';
 import { Project } from '../models/project.model.js';
@@ -255,6 +257,8 @@ export function toCard(p: Lean): PropertyCard {
     location: c.location,
     plotApproval: c.plotApproval,
     pgGender: c.pgGender,
+    partnerBadge: p.partnerBadge ?? false,
+    refreshedAt: iso(p.refreshedAt ?? p.publishedAt),
   };
 }
 
@@ -328,7 +332,7 @@ async function enquiryCounts(ids: Types.ObjectId[]) {
 /* ------------------------------------------------------------------ */
 
 export const CARD_FIELDS =
-  'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType geo plotApproval pgGender';
+  'slug listingType title category propertyType status citySlug cityName localitySlug localityName projectName price areaValue areaUnit areaSqft bedrooms bathrooms furnishingStatus possessionStatus images coverImageIndex featured verified isDemo availableFrom publishedAt updatedAt description posterType geo plotApproval pgGender partnerBadge refreshedAt';
 
 export const VISIBLE = { status: 'published', listingVisibility: 'public' } as const;
 
@@ -378,7 +382,7 @@ export function buildPublicFilter(
 }
 
 const SORTS: Record<PropertySearch['sort'], Record<string, SortOrder>> = {
-  newest: { featured: -1, publishedAt: -1, _id: -1 },
+  newest: { featured: -1, boostRank: -1, refreshedAt: -1, publishedAt: -1, _id: -1 },
   price_asc: { price: 1, _id: 1 },
   price_desc: { price: -1, _id: -1 },
   area_desc: { areaSqft: -1, _id: -1 },
@@ -608,6 +612,7 @@ function statusSideEffects(current: Partial<Lean>, next: PropertyStatus) {
   const out: Record<string, unknown> = { status: next };
   if (next === 'published') {
     if (!current.publishedAt) out.publishedAt = new Date();
+    if (!current.publishedAt || !current.refreshedAt) out.refreshedAt = new Date();
     out.moderationNote = undefined;
   }
   if (next === 'pending') out.submittedAt = new Date();
@@ -795,6 +800,7 @@ export async function changeStatus(
     doc.moderationNote = note!.trim();
     await doc.save();
   }
+  if (doc.postedBy && status === 'published') void syncPlanPerksFor(String(doc.postedBy));
   if (doc.postedBy && before === 'pending' && (status === 'published' || status === 'rejected')) {
     void notifyPoster(doc.postedBy, doc.title, doc.slug, status, note);
   }
@@ -931,6 +937,7 @@ export async function createMine(
     areaSqft: toSqft(input.areaValue, input.areaUnit),
     postedBy: user.id,
     posterType: posterTypeFor(user.role),
+    ...(await listingPerksFor(user.id)),
     ...statusSideEffects({}, input.status),
     awaitingPlan: hold,
     slotUsed: outcome === 'claimed',
