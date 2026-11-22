@@ -25,14 +25,28 @@ export function formatRent(amount: number): string {
   return `${formatINRShort(amount)}/month`;
 }
 
-/** Price label for a listing: "₹25,000/month" for rent, "₹45 L" for sale. */
+/** A listing with no price (₹0) is shown as "Free". */
+export const FREE_PRICE_LABEL = 'Free';
+
+/** True when a listing's price is ₹0 (only admins can set this). */
+export function isFreePrice(amount: number | null | undefined): boolean {
+  return amount === 0;
+}
+
+/** Price label for a listing: "₹25,000/month" for rent, "₹45 L" for sale, "Free" for ₹0. */
 export function formatPrice(amount: number, listingType: 'rent' | 'sale'): string {
+  if (isFreePrice(amount)) return FREE_PRICE_LABEL;
   return listingType === 'rent' ? formatRent(amount) : formatINRShort(amount);
 }
 
-/** Price per square foot for sale listings, rounded to the rupee. */
+/** Full rupee price for a listing ("₹25,000"), or "Free" for ₹0. */
+export function formatListingPrice(amount: number): string {
+  return isFreePrice(amount) ? FREE_PRICE_LABEL : formatINR(amount);
+}
+
+/** Price per square foot for sale listings, rounded to the rupee. Null for free listings. */
 export function pricePerSqft(price: number, areaSqft: number): number | null {
-  return areaSqft > 0 ? Math.round(price / areaSqft) : null;
+  return price > 0 && areaSqft > 0 ? Math.round(price / areaSqft) : null;
 }
 
 export function formatArea(value: number, unit: AreaUnit): string {

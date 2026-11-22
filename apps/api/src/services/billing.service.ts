@@ -87,6 +87,17 @@ export async function listPlans(onlyActive = false, role?: UserRole) {
   return rows.map(toPlan);
 }
 
+/**
+ * The admin's free (₹0) plan for this account type, if there is one. It is on for every
+ * such user who has no paid plan running: nothing to buy, no payment, no end date.
+ * With several, the first in admin order wins.
+ */
+export async function freePlanFor(role: UserRole) {
+  return Plan.findOne({ active: true, price: 0, roles: role })
+    .sort({ sortOrder: 1, createdAt: 1 })
+    .lean<PlanLean>();
+}
+
 /** Creates the ₹599 Premium plan the first time the API starts with no plans at all. */
 export async function ensureDefaultPlan() {
   if (await Plan.exists({})) return false;
@@ -508,6 +519,7 @@ export async function recordManualPayment(input: z.output<typeof manualPaymentSc
   if (!plan) throw notFound('Plan not found');
   if (!plan.roles.includes(user.role))
     throw badRequest('This plan is not for this type of account');
+  if (plan.price <= 0) throw badRequest('This plan is free and turns on by itself');
   const p = await Payment.create({
     user: user._id,
     plan: plan._id,
@@ -603,6 +615,12 @@ export async function claimListingSlot(userId: string, role: UserRole, exceptId?
     await Payment.updateOne({ _id: pay._id }, { $inc: { postsUsed: 1 } });
     return 'claimed' as const;
   }
+  // The admin's free plan works like a plan: a limit on listings live at one time.
+  const freePlan = await freePlanFor(role);
+  if (freePlan) {
+    const active = await activeListingCount(userId, exceptId);
+    return active >= freePlan.listingLimit ? ('hold' as const) : ('claimed' as const);
+  }
   const free = LISTING_LIMITS[role];
   if (free > 0) {
     const r = await User.updateOne(
@@ -623,6 +641,8 @@ async function listingSlots(userId: string, role: UserRole) {
   if (pay) {
     return { used: await activeListingCount(userId), limit: pay.planSnapshot.listingLimit };
   }
+  const freePlan = await freePlanFor(role);
+  if (freePlan) return { used: await activeListingCount(userId), limit: freePlan.listingLimit };
   const u = await User.findById(userId).select('freePostsUsed').lean();
   const limit = LISTING_LIMITS[role];
   return { used: Math.min(u?.freePostsUsed ?? 0, limit), limit };
@@ -769,6 +789,13 @@ async function leadAllowance(userId: string, role: UserRole) {
       sub,
     };
   }
+  const freePlan = await freePlanFor(role);
+  if (freePlan)
+    return {
+      limit: (freePlan.leadLimit ?? 0) > 0 ? freePlan.leadLimit! : null,
+      since: monthStart(),
+      sub: null,
+    };
   return { limit: FREE_LEADS_PER_MONTH[role], since: monthStart(), sub: null };
 }
 
@@ -1039,6 +1066,7 @@ export async function createCheckout(userId: string, planId: string): Promise<Ch
   ]);
   if (!user) throw notFound('Account not found');
   if (!plan || !plan.roles.includes(user.role)) throw notFound('Plan not found');
+  if (plan.price <= 0) throw badRequest('This plan is free and already on for you');
 
   const order = await razorpayOrder(plan.price, String(user._id), { planId: String(plan._id) });
   await Payment.create({

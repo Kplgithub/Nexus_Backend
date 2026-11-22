@@ -257,6 +257,37 @@ describe('posting and moderation', () => {
     expect(back.body.data.status).toBe('pending');
   });
 
+  it("turns the admin's free (₹0) plan on by itself for users without a paid plan", async () => {
+    const admin = await signIn(app);
+    const plan = await admin.post('/api/v1/admin/plans', {
+      name: 'Free',
+      price: 0,
+      durationDays: 30,
+      listingLimit: 2,
+      leadLimit: 3,
+      roles: ['individual'],
+    });
+    expect(plan.status).toBe(201);
+    const owner = await signUpUser(app, 'individual');
+    // Owners normally must pay first; the free plan lets them list up to its live limit.
+    const a = await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    const b = await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    expect([a.body.data.status, b.body.data.status]).toEqual(['pending', 'pending']);
+    const c = await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    expect(c.body.data).toMatchObject({ status: 'draft', awaitingPlan: true });
+    const usage = (await owner.get('/api/v1/me/dashboard')).body.data.usage;
+    expect(usage.listings).toEqual({ used: 2, limit: 2 });
+    expect(usage.leads.limit).toBe(3);
+    expect(usage.premium).toBe(false);
+    // Taking one down frees a place, like any plan.
+    await owner.post(`/api/v1/me/properties/${a.body.data.id}/status`, { status: 'draft' });
+    const d = await owner.post('/api/v1/me/properties', userListing({ status: 'pending' }));
+    expect(d.body.data.status).toBe('pending');
+    // Nothing to buy.
+    const checkout = await owner.post(`/api/v1/me/plans/${plan.body.data.id}/checkout`);
+    expect(checkout.status).toBeGreaterThanOrEqual(400);
+  });
+
   it('lets the poster close a live listing', async () => {
     const owner = await signUpUser(app, 'agent');
     const admin = await signIn(app);

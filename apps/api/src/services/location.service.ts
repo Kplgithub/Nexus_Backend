@@ -301,15 +301,20 @@ export async function getLocalityInsights(
   // Plots and farms are priced per area very differently from built homes; keep them out of the rate.
   const ppsf = (list: Row[]) =>
     list
-      .filter((r) => r.areaSqft > 0 && r.propertyType !== 'plot' && !isFarmType(r.propertyType))
+      .filter(
+        (r) =>
+          r.price > 0 && r.areaSqft > 0 && r.propertyType !== 'plot' && !isFarmType(r.propertyType),
+      )
       .map((r) => Math.round(r.price / r.areaSqft));
   const sale = rows.filter((r) => r.listingType === 'sale');
   const rent = rows.filter((r) => r.listingType === 'rent');
+  // Free (₹0) listings stay in the counts but are kept out of price figures.
+  const pricedSale = sale.filter((r) => r.price > 0);
   const homeRent = rent.filter((r) => r.category === 'residential' && r.propertyType !== 'pg');
 
   const byBhk = new Map<number, number[]>();
   for (const r of homeRent) {
-    if (r.bedrooms === null || r.bedrooms === undefined) continue;
+    if (r.bedrooms === null || r.bedrooms === undefined || r.price <= 0) continue;
     const k = Math.min(r.bedrooms, 4);
     byBhk.set(k, [...(byBhk.get(k) ?? []), r.price]);
   }
@@ -322,12 +327,12 @@ export async function getLocalityInsights(
     sale: {
       count: sale.length,
       medianPricePerSqft: median(ppsf(sale.filter((r) => r.category === 'residential'))),
-      minPrice: sale.length ? Math.min(...sale.map((r) => r.price)) : null,
-      maxPrice: sale.length ? Math.max(...sale.map((r) => r.price)) : null,
+      minPrice: pricedSale.length ? Math.min(...pricedSale.map((r) => r.price)) : null,
+      maxPrice: pricedSale.length ? Math.max(...pricedSale.map((r) => r.price)) : null,
     },
     rent: {
       count: rent.length,
-      medianRent: median(homeRent.map((r) => r.price)),
+      medianRent: median(homeRent.filter((r) => r.price > 0).map((r) => r.price)),
       medianRentByBhk: [...byBhk.entries()]
         .sort(([a], [b]) => a - b)
         .map(([bedrooms, prices]) => ({ bedrooms, rent: median(prices)! })),

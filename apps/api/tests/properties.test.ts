@@ -56,6 +56,17 @@ describe('property creation and validation', () => {
     );
   });
 
+  it('lets admins list at ₹0 (shown as Free) with no price per sq ft', async () => {
+    const sale = await s.post(
+      '/api/v1/admin/properties',
+      residential({ listingType: 'sale', price: 0, status: 'published' }),
+    );
+    expect(sale.status).toBe(201);
+    expect(sale.body.data).toMatchObject({ price: 0, pricePerSqft: null });
+    const blank = await s.post('/api/v1/admin/properties', residential({ price: null }));
+    expect(blank.status).toBe(422);
+  });
+
   it('rejects unknown localities', async () => {
     const res = await s.post('/api/v1/admin/properties', residential({ localitySlug: 'atlantis' }));
     expect(res.status).toBe(400);
