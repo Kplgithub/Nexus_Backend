@@ -2,6 +2,10 @@ import type { FilterQuery, SortOrder } from 'mongoose';
 import { Types } from 'mongoose';
 import {
   PUBLIC_DETAIL_STATUSES,
+  listingSectionOff,
+  SITE_SECTION_INFO,
+  type SiteSection,
+  type SiteSections,
   propertyValidateMerged,
   pricePerSqft,
   slugify,
@@ -50,6 +54,7 @@ import { escapeRegex, paginate } from '../lib/respond.js';
 import { env } from '../config/env.js';
 import { resolveLocation } from './location.service.js';
 import { deleteImages } from './upload.service.js';
+import { getSettings, sectionListingFilter } from './settings.service.js';
 import { sendMail } from './mail.service.js';
 
 type Lean = PropertyAttrs & { _id: Types.ObjectId; createdAt: Date; updatedAt: Date };
@@ -395,7 +400,10 @@ export async function searchPublic(
     ? ((await Project.findOne({ slug: q.project, status: 'published' }).select('_id').lean())
         ?._id ?? null)
     : null;
-  const filter = buildPublicFilter(q, projectId as Types.ObjectId | null);
+  const filter = {
+    ...buildPublicFilter(q, projectId as Types.ObjectId | null),
+    ...(await sectionListingFilter()),
+  };
   const [rows, total] = await Promise.all([
     Property.find(filter)
       .select(CARD_FIELDS)
@@ -410,14 +418,19 @@ export async function searchPublic(
 
 export type PublicDetailResult =
   | { kind: 'found'; property: PublicProperty; similar: PropertyCard[] }
-  | { kind: 'redirect'; slug: string };
+  | { kind: 'redirect'; slug: string }
+  /** The listing's site section is switched off: the website redirects or shows 404. */
+  | { kind: 'off'; section: SiteSection };
 
 export async function getPublicBySlug(slug: string): Promise<PublicDetailResult> {
   const p = await Property.findOne({ slug, status: { $in: PUBLIC_DETAIL_STATUSES } }).lean<Lean>();
   if (p) {
+    const { sections } = await getSettings();
+    const off = listingSectionOff(p, sections);
+    if (off) return { kind: 'off', section: off };
     const [posters, project] = await Promise.all([
       postersById([p.postedBy]),
-      p.projectId
+      p.projectId && sections.projects !== false
         ? Project.findOne({ _id: p.projectId, status: 'published' }).select('slug name').lean()
         : null,
     ]);
@@ -443,6 +456,7 @@ export async function getPublicBySlug(slug: string): Promise<PublicDetailResult>
 async function findSimilar(p: Lean, limit = 4): Promise<PropertyCard[]> {
   const base: FilterQuery<PropertyAttrs> = {
     ...VISIBLE,
+    ...(await sectionListingFilter()),
     _id: { $ne: p._id },
     listingType: p.listingType,
     category: p.category,
@@ -472,7 +486,8 @@ async function findSimilar(p: Lean, limit = 4): Promise<PropertyCard[]> {
 
 /** Home page rails; `citySlug` limits every rail and count to one city. */
 export async function listHomeSections(citySlug?: string) {
-  const base = citySlug ? { ...VISIBLE, citySlug } : VISIBLE;
+  const hidden = await sectionListingFilter();
+  const base = citySlug ? { ...VISIBLE, ...hidden, citySlug } : { ...VISIBLE, ...hidden };
   const [featured, recentSale, recentRent, counts] = await Promise.all([
     Property.find({ ...base, featured: true })
       .select(CARD_FIELDS)
@@ -520,7 +535,11 @@ export async function recordView(id: string) {
 
 /** Lightweight list for the XML sitemap. Demo listings are noindex, so they are excluded. */
 export async function sitemapEntries() {
-  const rows = await Property.find({ ...VISIBLE, isDemo: { $ne: true } })
+  const rows = await Property.find({
+    ...VISIBLE,
+    ...(await sectionListingFilter()),
+    isDemo: { $ne: true },
+  })
     .select('slug updatedAt')
     .sort({ updatedAt: -1 })
     .limit(45_000)
@@ -909,20 +928,48 @@ export async function listMine(userId: string, status?: PropertyStatus) {
     .sort({ updatedAt: -1 })
     .limit(500)
     .lean<Lean[]>();
-  const counts = await enquiryCounts(rows.map((r) => r._id));
-  return rows.map((r) => toOwn(r, counts.get(String(r._id)) ?? 0));
+  const [counts, { sections }] = await Promise.all([
+    enquiryCounts(rows.map((r) => r._id)),
+    getSettings(),
+  ]);
+  return rows.map((r) => withSection(toOwn(r, counts.get(String(r._id)) ?? 0), sections));
 }
 
 export async function getMine(userId: string, id: string) {
   const doc = await ownedDoc(userId, id);
-  const counts = await enquiryCounts([doc._id]);
-  return toOwn(doc.toObject() as unknown as Lean, counts.get(String(doc._id)) ?? 0);
+  const [counts, { sections }] = await Promise.all([enquiryCounts([doc._id]), getSettings()]);
+  return withSection(
+    toOwn(doc.toObject() as unknown as Lean, counts.get(String(doc._id)) ?? 0),
+    sections,
+  );
+}
+
+/** Marks a member's listing whose site section is switched off (hidden, not deleted). */
+function withSection(l: OwnListing, sections: SiteSections): OwnListing {
+  const off = listingSectionOff(l, sections);
+  return off ? { ...l, sectionOff: off } : l;
+}
+
+/** New listings (or a type change) can't go into a switched-off section. */
+async function assertSectionOpen(p: {
+  category: string;
+  listingType: string;
+  propertyType: string;
+}) {
+  const off = listingSectionOff(p, (await getSettings()).sections);
+  if (off) {
+    throw badRequest(
+      `${SITE_SECTION_INFO[off].label} listings are paused on NEXUS Estate right now. Please choose another type.`,
+      { propertyType: ['This type is paused right now'] },
+    );
+  }
 }
 
 export async function createMine(
   user: { id: string; role: UserRole },
   input: UserPropertyCreate,
 ): Promise<OwnListing> {
+  await assertSectionOpen(input);
   const loc = await resolveLocation(input.citySlug, input.localitySlug, { activeOnly: true });
   await checkProject(input.projectId, input.citySlug);
   const outcome = input.status === 'pending' ? await reviewOrHold(user.id, user.role) : null;
@@ -960,6 +1007,13 @@ export async function updateMine(
   const doc = await ownedDoc(user.id, id);
   if (['rented', 'sold', 'archived'].includes(doc.status)) {
     throw forbidden('This listing is closed. Reactivate it before editing.');
+  }
+  if (patch.category || patch.listingType || patch.propertyType) {
+    await assertSectionOpen({
+      category: patch.category ?? doc.category,
+      listingType: patch.listingType ?? doc.listingType,
+      propertyType: patch.propertyType ?? doc.propertyType,
+    });
   }
   if (patch.citySlug || patch.localitySlug) {
     await resolveLocation(patch.citySlug ?? doc.citySlug, patch.localitySlug ?? doc.localitySlug, {

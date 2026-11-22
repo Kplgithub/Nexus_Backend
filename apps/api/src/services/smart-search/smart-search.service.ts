@@ -4,6 +4,7 @@ import type { FilterQuery } from 'mongoose';
 import { Property, type PropertyAttrs } from '../../models/property.model.js';
 import { SearchLog } from '../../models/search-log.model.js';
 import { CARD_FIELDS, VISIBLE, toCard } from '../property.service.js';
+import { sectionListingFilter } from '../settings.service.js';
 import { listPublicLocations } from '../location.service.js';
 import { logger } from '../../lib/logger.js';
 import { parseQuery, understoodKeys, type Intent, type PlaceRef, type Point } from './parse.js';
@@ -267,8 +268,17 @@ function filtersFor(i: Intent, city: string) {
 }
 
 /** The hard limits: rent vs sale, the city, and the family of property (a PG is never a flat). */
-function candidateFilter(i: Intent, city: string): FilterQuery<PropertyAttrs> {
-  const f: FilterQuery<PropertyAttrs> = { ...VISIBLE, listingType: i.listingType, citySlug: city };
+function candidateFilter(
+  i: Intent,
+  city: string,
+  hidden: FilterQuery<PropertyAttrs>,
+): FilterQuery<PropertyAttrs> {
+  const f: FilterQuery<PropertyAttrs> = {
+    ...VISIBLE,
+    ...hidden,
+    listingType: i.listingType,
+    citySlug: city,
+  };
   const t = i.types ?? [];
   if (t.includes('pg') && t.length === 1) f.propertyType = 'pg';
   else if (t.includes('plot')) f.propertyType = { $in: ['plot', 'industrial-land'] };
@@ -308,7 +318,7 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
   const keys = understoodKeys(intent);
   const understood = keys.length > 0;
 
-  const rows = await Property.find(candidateFilter(intent, city.slug))
+  const rows = await Property.find(candidateFilter(intent, city.slug, await sectionListingFilter()))
     .select(MATCH_FIELDS)
     .sort({ featured: -1, boostRank: -1, refreshedAt: -1, publishedAt: -1 })
     .limit(CANDIDATE_LIMIT)
