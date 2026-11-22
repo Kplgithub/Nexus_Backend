@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import type { ProfileCard, PublicProfile } from '@nexus/shared';
 import { User } from '../models/user.model.js';
+import { projectsOn, sectionListingFilter } from './settings.service.js';
 import { City } from '../models/misc.models.js';
 import { Property } from '../models/property.model.js';
 import { Project } from '../models/project.model.js';
@@ -38,12 +39,13 @@ export async function getProfile(role: Role, slug: string): Promise<PublicProfil
     .select(FIELDS)
     .lean<ProfileUser>();
   if (!u) throw notFound('Profile not found');
+  const hidden = await sectionListingFilter();
   const [counts, projects, city] = await Promise.all([
     Property.aggregate<{ _id: string; n: number }>([
-      { $match: { ...LIVE, postedBy: u._id } },
+      { $match: { ...LIVE, ...hidden, postedBy: u._id } },
       { $group: { _id: '$listingType', n: { $sum: 1 } } },
     ]),
-    Project.countDocuments({ builder: u._id, status: 'published' }),
+    (await projectsOn()) ? Project.countDocuments({ builder: u._id, status: 'published' }) : 0,
     u.citySlug ? City.findOne({ slug: u.citySlug, active: true }).lean() : null,
   ]);
   const by = Object.fromEntries(counts.map((c) => [c._id, c.n]));
@@ -95,7 +97,13 @@ export async function listProfiles(q: {
     .select('role name companyName verified logoUrl experienceYears profileSlug createdAt')
     .lean<ProfileUser[]>();
   const counts = await Property.aggregate<{ _id: Types.ObjectId; n: number }>([
-    { $match: { ...LIVE, postedBy: { $in: users.map((u) => u._id) } } },
+    {
+      $match: {
+        ...LIVE,
+        ...(await sectionListingFilter()),
+        postedBy: { $in: users.map((u) => u._id) },
+      },
+    },
     { $group: { _id: '$postedBy', n: { $sum: 1 } } },
   ]);
   const n = new Map(counts.map((c) => [String(c._id), c.n]));
@@ -127,8 +135,8 @@ export async function listProfiles(q: {
 /** Agent and builder pages for the sitemap: only profiles with something live. */
 export async function sitemapProfiles() {
   const [posters, builders] = await Promise.all([
-    Property.distinct('postedBy', LIVE),
-    Project.distinct('builder', { status: 'published' }),
+    Property.distinct('postedBy', { ...LIVE, ...(await sectionListingFilter()) }),
+    (await projectsOn()) ? Project.distinct('builder', { status: 'published' }) : [],
   ]);
   const users = await User.find({
     _id: { $in: [...posters, ...builders] },

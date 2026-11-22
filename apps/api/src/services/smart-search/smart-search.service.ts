@@ -4,8 +4,8 @@ import type { FilterQuery } from 'mongoose';
 import { Property, type PropertyAttrs } from '../../models/property.model.js';
 import { SearchLog } from '../../models/search-log.model.js';
 import { CARD_FIELDS, VISIBLE, toCard } from '../property.service.js';
+import { farmListingsHidden, sectionListingFilter } from '../settings.service.js';
 import { listPublicLocations } from '../location.service.js';
-import { farmListingsHidden } from '../settings.service.js';
 import { logger } from '../../lib/logger.js';
 import { parseQuery, understoodKeys, type Intent, type PlaceRef, type Point } from './parse.js';
 import { scoreListing, type MatchReason } from './rank.js';
@@ -268,8 +268,18 @@ function filtersFor(i: Intent, city: string) {
 }
 
 /** The hard limits: rent vs sale, the city, and the family of property (a PG is never a flat). */
-function candidateFilter(i: Intent, city: string, hideFarms: boolean): FilterQuery<PropertyAttrs> {
-  const f: FilterQuery<PropertyAttrs> = { ...VISIBLE, listingType: i.listingType, citySlug: city };
+function candidateFilter(
+  i: Intent,
+  city: string,
+  hidden: FilterQuery<PropertyAttrs>,
+  hideFarms: boolean,
+): FilterQuery<PropertyAttrs> {
+  const f: FilterQuery<PropertyAttrs> = {
+    ...VISIBLE,
+    ...hidden,
+    listingType: i.listingType,
+    citySlug: city,
+  };
   const t = (i.types ?? []).filter((x) => !hideFarms || !isFarmType(x));
   if (t.includes('pg') && t.length === 1) f.propertyType = 'pg';
   else if (t.length && t.every((x) => isFarmType(x))) f.propertyType = { $in: t };
@@ -315,7 +325,9 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
   const understood = keys.length > 0;
 
   const hideFarms = await farmListingsHidden();
-  const rows = await Property.find(candidateFilter(intent, city.slug, hideFarms))
+  const rows = await Property.find(
+    candidateFilter(intent, city.slug, await sectionListingFilter(), hideFarms),
+  )
     .select(MATCH_FIELDS)
     .sort({ featured: -1, boostRank: -1, refreshedAt: -1, publishedAt: -1 })
     .limit(CANDIDATE_LIMIT)

@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import {
+  DEFAULT_SITE_SECTIONS,
+  SECTION_OFF_ACTIONS,
+  SITE_SECTIONS,
   ALERT_EVENTS,
   FEATURE_DAYS,
   PAYMENT_STATUSES,
@@ -920,6 +923,11 @@ export const farmOn = (
   const f = { ...DEFAULT_FARMS, ...(farms ?? {}) };
   return f.enabled && f[place];
 };
+export const siteSectionsSchema = z.object(
+  Object.fromEntries(SITE_SECTIONS.map((k) => [k, z.boolean().default(true)])) as {
+    [K in (typeof SITE_SECTIONS)[number]]: z.ZodDefault<z.ZodBoolean>;
+  },
+);
 
 /** Indian GST number: 2 digit state code, PAN, entity number, Z, check digit. */
 export const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
@@ -1014,6 +1022,10 @@ export const siteSettingsSchema = z.object({
     .or(z.literal('').transform(() => undefined)),
   homeLoan: homeLoanSettingsSchema.default(DEFAULT_HOME_LOAN),
   farms: farmSettingsSchema.default(DEFAULT_FARMS),
+  /** Admin → Settings → Site sections: each switch shows or hides a part of the site. */
+  sections: siteSectionsSchema.default(DEFAULT_SITE_SECTIONS),
+  /** What a switched-off section's pages do: redirect (default, kinder to SEO) or 404. */
+  sectionOffAction: z.enum(SECTION_OFF_ACTIONS).default('redirect'),
 });
 export type SiteSettingsInput = z.input<typeof siteSettingsSchema>;
 export const siteSettingsUpdateSchema = siteSettingsSchema.partial();

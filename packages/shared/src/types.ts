@@ -1,4 +1,7 @@
 import type {
+  SectionOffAction,
+  SiteSection,
+  SiteSections,
   AdminRole,
   AlertEvent,
   PaymentKind,
@@ -227,6 +230,8 @@ export type OwnListing = Omit<PublicProperty, 'status' | 'poster'> & {
   awaitingPlan: boolean;
   /** Featured by the user with a plan feature, until this date. */
   featuredUntil: string | null;
+  /** Set when the listing's site section is switched off: hidden from the site for now. */
+  sectionOff?: SiteSection;
 };
 
 export type AdminProperty = OwnListing & {
@@ -372,6 +377,9 @@ export type SiteSettings = {
   };
   /** Farm property switches (main switch plus one per place on the site). */
   farms: FarmSettings;
+  /** Which parts of the public site are on. Off hides pages, links and listings. */
+  sections: SiteSections;
+  sectionOffAction: SectionOffAction;
 };
 
 /** What the sign-in screens can offer, based on server configuration. */
