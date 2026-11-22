@@ -3,6 +3,9 @@ import {
   ADMIN_ROLES,
   ENQUIRY_STATUSES,
   ENQUIRY_TYPES,
+  LOAN_EMPLOYMENT,
+  LOAN_PURPOSES,
+  LOAN_STAGES,
   FAQ_CATEGORIES,
   LANDMARK_KINDS,
   REPORT_REASONS,
@@ -81,6 +84,23 @@ const enquirySchema = new Schema(
     seenByOwner: { type: Boolean, default: false },
     /** Over the owner's free lead limit: contact details stay hidden until they take a plan. */
     lockedForOwner: { type: Boolean, default: false },
+    /** Home loan leads only. NEXUS is not a lender; the team passes the lead to a bank. */
+    loan: {
+      type: new Schema(
+        {
+          amount: { type: Number, required: true },
+          monthlyIncome: { type: Number, default: null },
+          employment: { type: String, enum: LOAN_EMPLOYMENT, required: true },
+          purpose: { type: String, enum: LOAN_PURPOSES, required: true },
+          lender: { type: String, maxlength: 80, default: null },
+          stage: { type: String, enum: LOAN_STAGES, default: 'new' },
+          bank: { type: String, maxlength: 80, default: null },
+          sentToBankAt: { type: Date, default: null },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   { timestamps: true },
 );
@@ -93,6 +113,7 @@ enquirySchema.index({ listingOwner: 1, createdAt: -1 });
 enquirySchema.index({ user: 1, createdAt: -1 });
 enquirySchema.index({ project: 1, createdAt: -1 });
 enquirySchema.index({ assignedAdmin: 1, status: 1, createdAt: -1 });
+enquirySchema.index({ type: 1, createdAt: -1 });
 export const Enquiry = model('Enquiry', enquirySchema);
 
 /* ---------------- Locations ---------------- */

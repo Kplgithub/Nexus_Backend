@@ -14,6 +14,9 @@ import type {
   Category,
   EnquiryStatus,
   EnquiryType,
+  LoanEmployment,
+  LoanPurpose,
+  LoanStage,
   FaqCategory,
   FurnishingStatus,
   LandmarkKind,
@@ -40,6 +43,7 @@ import type {
   UserRole,
   UserStatus,
 } from './constants.js';
+import type { LoanLender } from './schemas.js';
 
 /** Envelope used by every API response. */
 export type ApiSuccess<T> = { ok: true; data: T; meta?: PaginationMeta };
@@ -347,6 +351,13 @@ export type SiteSettings = {
   invoice: InvoiceSettings;
   /** Admin only. */
   enquiryNotificationEmail?: string;
+  /** Home loan page: rates table and calculator defaults. */
+  homeLoan: {
+    enabled: boolean;
+    lenders: LoanLender[];
+    ratesCheckedAt: string | null;
+    exampleRate: number;
+  };
 };
 
 /** What the sign-in screens can offer, based on server configuration. */
@@ -379,6 +390,19 @@ export type Enquiry = {
   userId: string | null;
   /** Set when the listing belongs to a user (owner/agent/builder). */
   listingOwner: { id: string; name: string } | null;
+  /** Home loan leads only. */
+  loan: EnquiryLoan | null;
+};
+
+export type EnquiryLoan = {
+  amount: number;
+  monthlyIncome: number | null;
+  employment: LoanEmployment;
+  purpose: LoanPurpose;
+  lender: string | null;
+  stage: LoanStage;
+  bank: string | null;
+  sentToBankAt: string | null;
 };
 
 /** An enquiry as seen by the user who posted the listing. */

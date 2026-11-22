@@ -165,3 +165,148 @@ describe('admin enquiry management', () => {
     expect(csv.text).toContain(`"'=HYPERLINK(""x"")"`);
   });
 });
+
+describe('home loan enquiries', () => {
+  beforeEach(async () => {
+    await s.patch('/api/v1/admin/settings', { homeLoan: { enabled: true } });
+  });
+
+  it('refuses loan leads while the feature is switched off', async () => {
+    await s.patch('/api/v1/admin/settings', { homeLoan: { enabled: false } });
+    const res = await request(app)
+      .post('/api/v1/enquiries')
+      .send(
+        enquiry({
+          type: 'home-loan',
+          loan: { amount: 3_500_000, employment: 'salaried', purpose: 'looking' },
+        }),
+      );
+    expect(res.status).toBe(403);
+  });
+
+  const loan = (o: Record<string, unknown> = {}) =>
+    enquiry({
+      type: 'home-loan',
+      sourcePage: '/home-loan',
+      loan: {
+        amount: 3_500_000,
+        monthlyIncome: 90_000,
+        employment: 'salaried',
+        purpose: 'looking',
+      },
+      ...o,
+    });
+
+  it('saves a loan lead with its own id and keeps it away from the listing owner', async () => {
+    const res = await request(app)
+      .post('/api/v1/enquiries')
+      .send(
+        loan({
+          propertyId: property.id,
+          loan: { amount: 4_000_000, employment: 'business', purpose: 'found', lender: 'Bank 2' },
+        }),
+      );
+    expect(res.status).toBe(201);
+    expect(res.body.data.leadId).toMatch(/^NX-H-\d{4}-\d{5}$/);
+    const saved = await Enquiry.findOne({ leadId: res.body.data.leadId }).lean();
+    expect(saved?.type).toBe('home-loan');
+    expect(saved?.loan?.amount).toBe(4_000_000);
+    expect(saved?.loan?.stage).toBe('new');
+    expect(saved?.loan?.lender).toBe('Bank 2');
+    expect(String(saved?.property)).toBe(property.id);
+    expect(saved?.listingOwner).toBeNull();
+  });
+
+  it('needs loan details and a sensible amount', async () => {
+    expect(
+      (
+        await request(app)
+          .post('/api/v1/enquiries')
+          .send(loan({ loan: undefined }))
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await request(app)
+          .post('/api/v1/enquiries')
+          .send(loan({ loan: { amount: 500, employment: 'salaried', purpose: 'looking' } }))
+      ).status,
+    ).toBe(422);
+  });
+
+  it('does not merge a loan lead into a property enquiry from the same phone', async () => {
+    const a = await request(app)
+      .post('/api/v1/enquiries')
+      .send(enquiry({ propertyId: property.id }));
+    const b = await request(app)
+      .post('/api/v1/enquiries')
+      .send(loan({ propertyId: property.id }));
+    expect(a.body.data.leadId).not.toBe(b.body.data.leadId);
+  });
+
+  it('lets the team filter loan leads and move them to a bank', async () => {
+    await request(app)
+      .post('/api/v1/enquiries')
+      .send(enquiry({ propertyId: property.id }));
+    await request(app).post('/api/v1/enquiries').send(loan());
+    const list = await s.get('/api/v1/admin/enquiries?type=home-loan');
+    expect(list.body.data).toHaveLength(1);
+    const id = list.body.data[0].id;
+    expect(list.body.data[0].loan.employment).toBe('salaried');
+
+    // Needs a bank name before it can be marked as sent.
+    expect(
+      (await s.patch(`/api/v1/admin/enquiries/${id}`, { loanStage: 'sent-to-bank' })).status,
+    ).toBe(400);
+    const sent = await s.patch(`/api/v1/admin/enquiries/${id}`, {
+      loanBank: 'Some Bank',
+      loanStage: 'sent-to-bank',
+    });
+    expect(sent.status).toBe(200);
+    expect(sent.body.data.loan.stage).toBe('sent-to-bank');
+    expect(sent.body.data.loan.bank).toBe('Some Bank');
+    expect(sent.body.data.loan.sentToBankAt).toBeTruthy();
+    expect(sent.body.data.notes.at(-1).text).toContain('Sent to bank');
+
+    const normal = (await s.get('/api/v1/admin/enquiries?type=property')).body.data[0].id;
+    expect(
+      (await s.patch(`/api/v1/admin/enquiries/${normal}`, { loanStage: 'called' })).status,
+    ).toBe(400);
+  });
+
+  it('stores lender rates in settings and shows them publicly', async () => {
+    const before = await request(app).get('/api/v1/settings');
+    expect(before.body.data.homeLoan.lenders).toEqual([]);
+    expect(before.body.data.homeLoan.enabled).toBe(true);
+    const checked = new Date().toISOString();
+    const res = await s.patch('/api/v1/admin/settings', {
+      homeLoan: {
+        enabled: true,
+        lenders: [
+          {
+            name: 'Bank One',
+            kind: 'bank',
+            rateFrom: 7.4,
+            maxTenureYears: 30,
+            processingFee: '0.35%',
+            active: true,
+          },
+        ],
+        ratesCheckedAt: checked,
+        exampleRate: 8.25,
+      },
+    });
+    expect(res.status).toBe(200);
+    // Saving another part of settings keeps the rates.
+    await s.patch('/api/v1/admin/settings', { featurePrices: { days7: 49, days30: 99 } });
+    const pub = await request(app).get('/api/v1/settings');
+    expect(pub.body.data.homeLoan.lenders[0].name).toBe('Bank One');
+    expect(pub.body.data.homeLoan.ratesCheckedAt).toBe(checked);
+    expect(pub.body.data.homeLoan.exampleRate).toBe(8.25);
+    // Flipping only the switch keeps the rates.
+    await s.patch('/api/v1/admin/settings', { homeLoan: { enabled: false } });
+    const off = await request(app).get('/api/v1/settings');
+    expect(off.body.data.homeLoan.enabled).toBe(false);
+    expect(off.body.data.homeLoan.lenders).toHaveLength(1);
+  });
+});

@@ -11,7 +11,7 @@ import { logger } from './logger.js';
  * Calls are batched for a moment so a bulk change sends one request.
  * Production default: the website on the same server (port 3000).
  */
-export type WebTag = 'properties' | 'projects' | 'profiles' | 'locations';
+export type WebTag = 'properties' | 'projects' | 'profiles' | 'locations' | 'settings';
 
 const DEBOUNCE_MS = 300;
 const pending = new Set<WebTag>();
