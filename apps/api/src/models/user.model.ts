@@ -110,3 +110,19 @@ otpSchema.index({ phone: 1, purpose: 1, createdAt: -1 });
 otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 3600 });
 
 export const Otp = model('Otp', otpSchema);
+
+/**
+ * One row per code actually sent, kept for a day so hourly and daily limits per
+ * number and per network can be counted. (Otp rows are deleted about an hour
+ * after they expire, which is too soon for a daily count.)
+ */
+const otpSendSchema = new Schema({
+  phone: { type: String, required: true },
+  ipHash: { type: String },
+  createdAt: { type: Date, default: () => new Date() },
+});
+otpSendSchema.index({ phone: 1, createdAt: -1 });
+otpSendSchema.index({ ipHash: 1, createdAt: -1 });
+otpSendSchema.index({ createdAt: 1 }, { expireAfterSeconds: 25 * 60 * 60 });
+
+export const OtpSend = model('OtpSend', otpSendSchema);
