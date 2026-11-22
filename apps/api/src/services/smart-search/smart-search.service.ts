@@ -294,7 +294,7 @@ function pickReasons(all: MatchReason[]): MatchReason[] {
   return [...hits, ...misses];
 }
 
-const MATCH_FIELDS = `${CARD_FIELDS} amenities parking pgFoodIncluded preferredTenants`;
+const MATCH_FIELDS = `${CARD_FIELDS} amenities parking pgFoodIncluded preferredTenants boostRank`;
 
 export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchResponse> {
   const { city, localities, centers } = await places();
@@ -310,7 +310,7 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
 
   const rows = await Property.find(candidateFilter(intent, city.slug))
     .select(MATCH_FIELDS)
-    .sort({ featured: -1, publishedAt: -1 })
+    .sort({ featured: -1, boostRank: -1, refreshedAt: -1, publishedAt: -1 })
     .limit(CANDIDATE_LIMIT)
     .lean<Parameters<typeof toCard>[0][]>();
 
@@ -318,6 +318,7 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
     row: r,
     s: scoreListing(r as never, intent, centers),
     featured: Boolean((r as { featured?: boolean }).featured),
+    boost: (r as { boostRank?: number }).boostRank ?? 0,
     price: (r as { price: number }).price,
   }));
   scored.sort(
@@ -325,7 +326,8 @@ export async function smartSearch(q: SmartSearchQuery): Promise<SmartSearchRespo
       Number(b.s.exact) - Number(a.s.exact) ||
       b.s.score - a.s.score ||
       (intent.cheap ? a.price - b.price : 0) ||
-      Number(b.featured) - Number(a.featured),
+      Number(b.featured) - Number(a.featured) ||
+      b.boost - a.boost,
   );
   // Close matches only: a listing that meets under a third of the ask, or costs far
   // more than the budget, is noise. If nothing is close, show the best we have.

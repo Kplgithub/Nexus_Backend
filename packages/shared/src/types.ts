@@ -186,7 +186,15 @@ export type PropertyCard = Pick<
   | 'location'
   | 'plotApproval'
   | 'pgGender'
-> & { posterType: PosterType; imageCount: number; areaSqft: number };
+> & {
+  posterType: PosterType;
+  imageCount: number;
+  areaSqft: number;
+  /** The poster's plan gives a Premium Partner badge. */
+  partnerBadge: boolean;
+  /** Last time the listing moved back to the top (publish or plan auto refresh). */
+  refreshedAt: string | null;
+};
 
 /** A user's view of their own listing. */
 export type OwnListing = Omit<PublicProperty, 'status' | 'poster'> & {
@@ -833,6 +841,14 @@ export type Plan = {
   featuredDays: number;
   /** 0 means no limit. */
   leadLimit: number;
+  /** Cut price shown struck through; 0 means none. */
+  mrp: number;
+  /** 0 Normal, 1 High, 2 Higher, 3 Top (SEARCH_RANKS). */
+  searchRank: number;
+  partnerBadge: boolean;
+  /** 0 means off. */
+  autoRefreshDays: number;
+  recommended: boolean;
   roles: UserRole[];
   active: boolean;
   sortOrder: number;
@@ -852,6 +868,9 @@ export type Payment = {
     featuredListings: number;
     featuredDays: number;
     leadLimit: number;
+    searchRank: number;
+    partnerBadge: boolean;
+    autoRefreshDays: number;
   };
   amount: number;
   status: PaymentStatus;
