@@ -753,7 +753,9 @@ adminRouter.patch('/settings', requireRole('admin'), async (req, res) => {
     ) as typeof patch.farms;
   const s = await updateSettings(patch);
   // The home loan switch and site details show on every page: refresh the website now.
-  refreshWebsite('settings');
+  // The farm switch also hides or shows farm listings, so cached listings go too.
+  if (patch.farms) refreshWebsite('settings', 'properties');
+  else refreshWebsite('settings');
   await audit(req.admin, 'update', 'settings', undefined, Object.keys(patch).join(', '));
   ok(res, s);
 });
