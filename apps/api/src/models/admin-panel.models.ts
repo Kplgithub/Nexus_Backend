@@ -46,7 +46,8 @@ const planSchema = new Schema(
   {
     name: { type: String, required: true, maxlength: 60 },
     description: { type: String, maxlength: 300, default: '' },
-    price: { type: Number, required: true, min: 1 },
+    /** 0 = the free plan, on by itself for users without a paid plan. */
+    price: { type: Number, required: true, min: 0 },
     durationDays: { type: Number, required: true, min: 1 },
     listingLimit: { type: Number, required: true, min: 1 },
     featuredListings: { type: Number, default: 0 },

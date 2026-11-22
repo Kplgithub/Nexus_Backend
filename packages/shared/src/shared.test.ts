@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   coverFirst,
   enquiryCreateSchema,
+  formatListingPrice,
   formatPrice,
   formatRent,
   pricePerSqft,
@@ -61,6 +62,11 @@ describe('formatting', () => {
     expect(formatPrice(12500000, 'sale')).toBe('₹1.25 Cr');
     expect(formatPrice(850000, 'sale')).toBe('₹8.5 L');
     expect(formatPrice(18000, 'rent')).toBe('₹18,000/month');
+    expect(formatPrice(0, 'rent')).toBe('Free');
+    expect(formatPrice(0, 'sale')).toBe('Free');
+    expect(formatListingPrice(0)).toBe('Free');
+    expect(formatListingPrice(25000)).toBe('₹25,000');
+    expect(pricePerSqft(0, 1200)).toBeNull();
     expect(pricePerSqft(4500000, 1500)).toBe(3000);
   });
   it('converts area', () => {
@@ -132,6 +138,10 @@ describe('propertyCreateSchema', () => {
     const paths = r.error?.issues.map((i) => i.path.join('.'));
     expect(paths).toContain('bedrooms');
     expect(paths).toContain('bathrooms');
+  });
+  it('lets admins list at ₹0 but not users', () => {
+    expect(propertyCreateSchema.safeParse({ ...baseProperty, price: 0 }).success).toBe(true);
+    expect(userPropertyCreateSchema.safeParse({ ...baseProperty, price: 0 }).success).toBe(false);
   });
   it('rejects negative rent', () => {
     expect(propertyCreateSchema.safeParse({ ...baseProperty, price: -1 }).success).toBe(false);

@@ -342,6 +342,12 @@ const userPropertyFields = {
 
 const propertyBase = z.object({
   ...userPropertyFields,
+  /** Admins may list a property at ₹0; it is shown as "Free". Users must enter at least ₹1. */
+  price: z
+    .number({ error: 'Price is required (enter 0 to list it as Free)' })
+    .int('Use whole rupees')
+    .min(0, 'Cannot be negative')
+    .max(MAX_MONEY_INR, 'Amount looks too large'),
   slug: slug.optional(),
   status: z.enum(PROPERTY_STATUSES).default('draft'),
   /** "unlisted" = reachable by direct link only; hidden from search, home and sitemap. */
@@ -1313,8 +1319,8 @@ export const featureListingSchema = z.object({
 const planFields = {
   name: plainText(2, 60),
   description: plainText(0, 300),
-  /** Rupees, GST included. */
-  price: z.number().int().min(1).max(10_000_000),
+  /** Rupees, GST included. 0 = the free plan, on by itself for users without a paid plan. */
+  price: z.number().int().min(0).max(10_000_000),
   /** Optional cut price shown struck through. 0 means none. */
   mrp: z.number().int().min(0).max(10_000_000),
   durationDays: z.number().int().min(1).max(730),
