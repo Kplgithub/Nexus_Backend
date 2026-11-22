@@ -67,7 +67,11 @@ export const limiters = {
   upload: make(60_000, 40, 'Too many uploads. Please wait a minute.'),
   userLogin: make(15 * 60_000, 20, 'Too many sign-in attempts. Try again in 15 minutes.'),
   signup: make(60 * 60_000, 10, 'Too many sign-ups from this network. Try again later.'),
-  otp: make(15 * 60_000, 10, 'Too many code requests. Try again in 15 minutes.'),
+  otp: make(
+    15 * 60_000,
+    20,
+    'We are getting a lot of code requests from your network. Please try again in a few minutes.',
+  ),
   userWrite: make(60_000, 60, 'Too many requests. Please slow down.'),
   /** Smart search does a little more work per request than a plain filter. */
   smartSearch: make(60_000, 60, 'Too many searches. Please wait a minute.', true),

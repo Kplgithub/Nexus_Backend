@@ -580,6 +580,11 @@ export const OTP_LENGTH = 6;
 export const OTP_TTL_SECONDS = 600;
 export const OTP_RESEND_SECONDS = 30;
 export const OTP_MAX_ATTEMPTS = 5;
+/** Codes one mobile number can receive in an hour and in a day (all purposes together). */
+export const OTP_PHONE_PER_HOUR = 10;
+export const OTP_PHONE_PER_DAY = 20;
+/** Codes sent from one network (IP) in a day, to cap SMS cost from abuse. */
+export const OTP_IP_PER_DAY = 100;
 
 /** All Indian states and union territories, for adding cities anywhere in the country. */
 export const INDIAN_STATES = [
