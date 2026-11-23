@@ -837,3 +837,15 @@ export function hiddenListingConditions(
   if (on?.plot === false) out.push({ propertyType: 'plot' });
   return out;
 }
+
+/**
+ * Public address of the admin panel. Kept unguessable so the sign-in page can't be found by
+ * trying /admin. The pages still live under apps/web/src/app/admin; the website's proxy maps
+ * this address onto them and answers "not found" for /admin itself.
+ */
+export const ADMIN_PATH = '/nx-tx298a2v';
+
+/** An admin page path as alerts store it ("/admin/enquiries?open=…") → its public address. */
+export function adminHref(path: string): string {
+  return /^\/admin(?=$|[/?#])/.test(path) ? ADMIN_PATH + path.slice('/admin'.length) : path;
+}

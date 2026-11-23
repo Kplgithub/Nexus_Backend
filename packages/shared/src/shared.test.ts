@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADMIN_PATH,
+  adminHref,
   DEFAULT_FARMS,
   farmOn,
   pricePerLandUnit,
@@ -274,5 +276,17 @@ describe('farms', () => {
     });
     expect(q.propertyType).toEqual(['farmhouse', 'farm-land']);
     expect(q.farmWater).toEqual(['borewell', 'canal']);
+  });
+});
+
+describe('admin address', () => {
+  it('maps stored /admin links onto the secret address', () => {
+    expect(ADMIN_PATH).toMatch(/^\/[a-z0-9-]{8,}$/);
+    expect(ADMIN_PATH).not.toBe('/admin');
+    expect(adminHref('/admin')).toBe(ADMIN_PATH);
+    expect(adminHref('/admin/enquiries?open=1')).toBe(`${ADMIN_PATH}/enquiries?open=1`);
+    expect(adminHref('/admin?x=1')).toBe(`${ADMIN_PATH}?x=1`);
+    expect(adminHref('/administrator')).toBe('/administrator');
+    expect(adminHref('/dashboard')).toBe('/dashboard');
   });
 });
