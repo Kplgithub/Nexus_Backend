@@ -71,6 +71,8 @@ const envSchema = z
     /** Razorpay for paid plans. Unset = online payment off (manual payments still work). */
     RAZORPAY_KEY_ID: z.string().optional(),
     RAZORPAY_KEY_SECRET: z.string().optional(),
+    /** Secret set on the Razorpay webhook (Dashboard → Webhooks). Unset = webhook refused. */
+    RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
     ENABLE_API_DOCS: bool,
     /** Seconds; public GET responses get Cache-Control: public, s-maxage=... */

@@ -1107,10 +1107,97 @@ export async function confirmCheckout(
   if (!p) throw notFound('Payment not found');
   if (p.status === 'paid') return getPayment(p._id);
   if (!razorpaySignatureValid(input.orderId, input.paymentId, input.signature)) {
-    p.status = 'failed';
-    await p.save();
+    // Only a still-open order is marked failed; the webhook may already have paid it.
+    await Payment.updateOne({ _id: p._id, status: 'created' }, { $set: { status: 'failed' } });
     throw badRequest('Payment could not be verified. If money was taken, call us.');
   }
-  await markPaid(p, { paymentId: input.paymentId });
+  await settleOnline(p._id, input.paymentId);
   return getPayment(p._id);
+}
+
+/**
+ * Turns an open online payment into a paid one exactly once. The browser and the
+ * Razorpay webhook can both arrive for the same order, at the same moment.
+ */
+async function settleOnline(id: Types.ObjectId, paymentId: string) {
+  const claimed = await Payment.findOneAndUpdate(
+    { _id: id, method: 'online', status: { $in: ['created', 'failed'] } },
+    { $set: { status: 'paid' } },
+    { new: true },
+  );
+  if (!claimed) return false;
+  try {
+    await markPaid(claimed, { paymentId });
+  } catch (err) {
+    // Not saved yet (paidAt still empty): open the order again so a retry can finish it.
+    await Payment.updateOne({ _id: id, paidAt: null }, { $set: { status: 'created' } });
+    throw err;
+  }
+  return true;
+}
+
+/* ---------------- Razorpay webhook ---------------- */
+
+/** Razorpay signs the exact request body with the webhook secret (HMAC-SHA256, hex). */
+export function webhookSignatureValid(rawBody: Buffer, signature: string | undefined) {
+  if (!env.RAZORPAY_WEBHOOK_SECRET || !signature) return false;
+  const expected = crypto
+    .createHmac('sha256', env.RAZORPAY_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature.trim().toLowerCase());
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+type RzpEntity = {
+  id?: string;
+  order_id?: string;
+  amount?: number;
+  amount_paid?: number;
+  currency?: string;
+  status?: string;
+};
+type RzpEvent = {
+  event?: string;
+  payload?: { payment?: { entity?: RzpEntity }; order?: { entity?: RzpEntity } };
+};
+
+export type WebhookResult =
+  | 'paid'
+  | 'already_done'
+  | 'ignored_event'
+  | 'unknown_order'
+  | 'amount_mismatch'
+  | 'not_captured';
+
+/**
+ * Safety net for online payments: if the visitor closes the tab before the site hears
+ * back, Razorpay's payment.captured / order.paid still turns the plan or Featured on.
+ * The caller has already checked the signature.
+ */
+export async function handleRazorpayEvent(body: RzpEvent): Promise<WebhookResult> {
+  const kind = body.event;
+  if (kind !== 'payment.captured' && kind !== 'order.paid') return 'ignored_event';
+  const pay = body.payload?.payment?.entity;
+  const order = body.payload?.order?.entity;
+  const orderId = pay?.order_id ?? order?.id;
+  if (!orderId || !pay?.id) return 'ignored_event';
+  if (pay.status && pay.status !== 'captured') return 'not_captured';
+
+  const p = await Payment.findOne({ orderId }).select('_id status amount method').lean();
+  if (!p) {
+    logger.warn({ orderId, event: kind }, 'Razorpay webhook for an unknown order');
+    return 'unknown_order';
+  }
+  if (p.status === 'paid' || p.status === 'refunded') return 'already_done';
+  const paise = pay.amount ?? order?.amount_paid;
+  if (paise !== Math.round(p.amount * 100) || (pay.currency && pay.currency !== 'INR')) {
+    logger.error(
+      { orderId, paymentId: pay.id, paise, expected: p.amount * 100 },
+      'Razorpay webhook amount does not match the order',
+    );
+    return 'amount_mismatch';
+  }
+  return (await settleOnline(p._id, pay.id)) ? 'paid' : 'already_done';
 }
