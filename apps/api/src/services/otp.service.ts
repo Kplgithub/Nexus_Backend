@@ -48,7 +48,52 @@ async function deliver(phone: string, code: string): Promise<string | undefined>
     }
     return undefined;
   }
+  if (env.SMS_DRIVER === 'bulksms') {
+    await sendBulkSms(phone, code);
+    return undefined;
+  }
   throw new AppError(503, 'OTP_DISABLED', 'Sign-in by SMS code is not available yet.');
+}
+
+/**
+ * The DLT-approved OTP template, word for word. Operators drop any SMS whose text
+ * differs from the approved template, so change it only together with a new approval.
+ */
+export const bulkSmsOtpText = (code: string) =>
+  `Your secure otp is ${code}. Please do not share your otp with anyone. Regards, ${code}. HireVision -Dinoustech`;
+
+/** BulkSMSServiceProviders gateway. Any non-"Success" answer is a failure, never a silent pass. */
+async function sendBulkSms(phone: string, code: string) {
+  let digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) digits = `91${digits}`;
+  try {
+    const res = await fetch('https://sms.bulksmsserviceproviders.com/api/send/sms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        campaign_name: 'NEXUS_OTP',
+        auth_key: env.BULKSMS_AUTH_KEY,
+        receivers: digits,
+        sender: env.BULKSMS_SENDER,
+        route: env.BULKSMS_ROUTE,
+        message: {
+          msgdata: bulkSmsOtpText(code),
+          Template_ID: env.BULKSMS_OTP_TEMPLATE_ID,
+          coding: 1,
+        },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { status?: string };
+    if (!res.ok || body.status !== 'Success') {
+      // The gateway's answer only; it never contains the auth key or the code.
+      logger.error({ status: res.status, body }, 'BulkSMS OTP send failed');
+      throw new Error('sms failed');
+    }
+  } catch (err) {
+    logger.error({ err }, 'SMS delivery failed');
+    throw new AppError(502, 'SMS_FAILED', 'We could not send the SMS. Please try again shortly.');
+  }
 }
 
 export async function sendOtp(phone: string, purpose: OtpPurpose, ipHash?: string) {
