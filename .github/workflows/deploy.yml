@@ -27,9 +27,9 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
 
-      # Payment keys live only in GitHub secrets and the server .env, never in the repo.
+      # Payment and SMS keys live only in GitHub secrets and the server .env, never in the repo.
       # Each key is written only when its secret is set; the others stay as they are.
-      - name: Put Razorpay keys in the server .env
+      - name: Put Razorpay and SMS keys in the server .env
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
           USER: ${{ secrets.DEPLOY_USER }}
@@ -37,13 +37,16 @@ jobs:
           RZP_ID: ${{ secrets.RAZORPAY_KEY_ID }}
           RZP_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
           RZP_WEBHOOK: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          BULKSMS_KEY: ${{ secrets.BULKSMS_AUTH_KEY }}
         run: |
           lines=''
           if [ -n "$RZP_ID" ]; then lines="${lines}RAZORPAY_KEY_ID=${RZP_ID}"$'\n'; fi
           if [ -n "$RZP_SECRET" ]; then lines="${lines}RAZORPAY_KEY_SECRET=${RZP_SECRET}"$'\n'; fi
           if [ -n "$RZP_WEBHOOK" ]; then lines="${lines}RAZORPAY_WEBHOOK_SECRET=${RZP_WEBHOOK}"$'\n'; fi
+          # With a BulkSMS key, OTP SMS go through BulkSMS instead of MSG91.
+          if [ -n "$BULKSMS_KEY" ]; then lines="${lines}BULKSMS_AUTH_KEY=${BULKSMS_KEY}"$'\n'"SMS_DRIVER=bulksms"$'\n'; fi
           if [ -z "$lines" ]; then
-            echo 'Razorpay secrets not set, skipping'
+            echo 'Razorpay and SMS secrets not set, skipping'
             exit 0
           fi
           # The keys go over stdin, so they never appear in a command line or the log.
@@ -58,7 +61,7 @@ jobs:
               cat \"\$new\" >> \"\$tmp\"
               cat \"\$tmp\" > \"\$f\"
               rm -f \"\$tmp\" \"\$new\"
-              echo \"Razorpay keys updated: \$keys\"
+              echo \"Server keys updated: \$keys\"
             "
 
       - name: Deploy to Server via SSH

@@ -33,8 +33,14 @@ const envSchema = z
      *   disabled — OTP sign-in hidden; phone numbers are not verified.
      *   console  — development only: codes are logged and returned in API responses.
      *   msg91    — production SMS via MSG91 (DLT-approved OTP template required).
+     *   bulksms  — production SMS via BulkSMSServiceProviders (DLT-approved template below).
      */
-    SMS_DRIVER: z.enum(['disabled', 'console', 'msg91']).default('disabled'),
+    SMS_DRIVER: z.enum(['disabled', 'console', 'msg91', 'bulksms']).default('disabled'),
+    /** BulkSMSServiceProviders gateway. Sender, route and DLT template must match the approved ones. */
+    BULKSMS_AUTH_KEY: z.string().optional(),
+    BULKSMS_SENDER: z.string().default('DNHIRE'),
+    BULKSMS_ROUTE: z.string().default('TR'),
+    BULKSMS_OTP_TEMPLATE_ID: z.string().default('1107175679254991157'),
     MSG91_AUTH_KEY: z.string().optional(),
     MSG91_TEMPLATE_ID: z.string().optional(),
     /** Optional MSG91 Flow (DLT-approved) used to SMS a poster's number to a visitor: vars name, phone, title. */
@@ -117,6 +123,13 @@ const envSchema = z
         if (!env[key])
           ctx.addIssue({ code: 'custom', path: [key], message: `${key} is required for msg91` });
       }
+    }
+    if (env.SMS_DRIVER === 'bulksms' && !env.BULKSMS_AUTH_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BULKSMS_AUTH_KEY'],
+        message: 'BULKSMS_AUTH_KEY is required for bulksms',
+      });
     }
     if (env.UPLOAD_DRIVER === 'cloudinary') {
       for (const key of [
