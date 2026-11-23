@@ -6,6 +6,7 @@ import {
   type AlertChannels,
   type AlertEvent,
   type AlertSettings,
+  adminHref,
 } from '@nexus/shared';
 import { env, mailEnabled, whatsappEnabled } from '../config/env.js';
 import { logger } from '../lib/logger.js';
@@ -180,7 +181,7 @@ export async function businessAlert(
     const s = await getAlertSettings();
     if (!s.events[event]) return;
     const text = [alert.title, alert.body].filter(Boolean).join(' — ');
-    const url = alert.link ? `${env.PUBLIC_SITE_URL}${alert.link}` : `${env.PUBLIC_SITE_URL}/admin`;
+    const url = `${env.PUBLIC_SITE_URL}${adminHref(alert.link ?? '/admin')}`;
     const jobs: Promise<unknown>[] = [];
     if (!opts.skipEmail) {
       for (const to of s.emails) {

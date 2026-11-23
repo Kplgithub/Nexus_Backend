@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from 'nodemailer';
+import { ADMIN_PATH } from '@nexus/shared';
 import { env, mailEnabled } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { getSettings } from './settings.service.js';
@@ -50,8 +51,8 @@ export async function notifyNewLead(
       from: env.MAIL_FROM,
       to,
       subject,
-      text: `${text}\n\nOpen the admin dashboard: ${env.PUBLIC_SITE_URL}/admin`,
-      html: `<table>${rows}</table><p><a href="${esc(env.PUBLIC_SITE_URL)}/admin">Open the admin dashboard</a></p>`,
+      text: `${text}\n\nOpen the admin dashboard: ${env.PUBLIC_SITE_URL}${ADMIN_PATH}`,
+      html: `<table>${rows}</table><p><a href="${esc(env.PUBLIC_SITE_URL + ADMIN_PATH)}">Open the admin dashboard</a></p>`,
     });
   } catch (err) {
     logger.error({ err }, 'Lead notification email failed');
