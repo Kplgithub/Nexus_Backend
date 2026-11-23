@@ -27,6 +27,40 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
 
+      # Payment keys live only in GitHub secrets and the server .env, never in the repo.
+      # Each key is written only when its secret is set; the others stay as they are.
+      - name: Put Razorpay keys in the server .env
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          RZP_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+          RZP_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RZP_WEBHOOK: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+        run: |
+          lines=''
+          if [ -n "$RZP_ID" ]; then lines="${lines}RAZORPAY_KEY_ID=${RZP_ID}"$'\n'; fi
+          if [ -n "$RZP_SECRET" ]; then lines="${lines}RAZORPAY_KEY_SECRET=${RZP_SECRET}"$'\n'; fi
+          if [ -n "$RZP_WEBHOOK" ]; then lines="${lines}RAZORPAY_WEBHOOK_SECRET=${RZP_WEBHOOK}"$'\n'; fi
+          if [ -z "$lines" ]; then
+            echo 'Razorpay secrets not set, skipping'
+            exit 0
+          fi
+          # The keys go over stdin, so they never appear in a command line or the log.
+          printf '%s' "$lines" |
+            ssh -i ~/.ssh/id_deploy "$USER@$HOST" "
+              set -eu
+              f='$DEPLOY_PATH/apps/api/.env'
+              new=\$(mktemp) && tmp=\$(mktemp)
+              cat > \"\$new\"
+              keys=\$(cut -d= -f1 \"\$new\" | paste -sd'|')
+              grep -v -E \"^(\$keys)=\" \"\$f\" > \"\$tmp\" || true
+              cat \"\$new\" >> \"\$tmp\"
+              cat \"\$tmp\" > \"\$f\"
+              rm -f \"\$tmp\" \"\$new\"
+              echo \"Razorpay keys updated: \$keys\"
+            "
+
       - name: Deploy to Server via SSH
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
@@ -56,11 +90,11 @@ jobs:
             node --env-file=apps/api/.env apps/api/dist/scripts/apply-seo.js || echo 'seo:apply failed, continuing'
 
             echo 'Restarting nexus-api process...'
-            pm2 restart nexus-api
+            pm2 restart nexus-api --update-env
 
             echo 'Waiting for API health check...'
             for i in \$(seq 1 30); do
-              curl -fsS http://127.0.0.1:4000/api/v1/health && break
+              curl -fsS http://127.0.0.1:4000/api/v1/health && echo && break
               [ \$i -eq 30 ] && { pm2 logs nexus-api --lines 50 --nostream; exit 1; }
               sleep 2
             done

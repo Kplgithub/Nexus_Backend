@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import { pinoHttp } from 'pino-http';
 import mongoose from 'mongoose';
 import swaggerUi from 'swagger-ui-express';
-import { env, corsOrigins, isTest } from './config/env.js';
+import { env, corsOrigins, isTest, razorpayEnabled } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { limiters, originCheck, sanitizeBody } from './middleware/security.js';
@@ -15,6 +15,7 @@ import { publicRouter } from './routes/public.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
 import { authRouter } from './routes/auth.routes.js';
 import { meRouter } from './routes/me.routes.js';
+import { webhookRouter } from './routes/webhooks.routes.js';
 import { openApiDocument } from './docs/openapi.js';
 
 export function createApp(): Express {
@@ -64,6 +65,8 @@ export function createApp(): Express {
       }),
     );
   }
+  // Webhooks read their own raw body (signatures cover the exact bytes), so they come first.
+  app.use('/api/v1/webhooks', webhookRouter);
   app.use(express.json({ limit: '200kb' }));
   app.use(cookieParser());
   app.use(sanitizeBody);
@@ -85,6 +88,9 @@ export function createApp(): Express {
         status: dbPing ? 'ok' : 'degraded',
         db: dbPing ? 'up' : 'down',
         uptime: Math.round(process.uptime()),
+        // Lets the deploy check that the payment keys reached the running server.
+        onlinePayments: razorpayEnabled,
+        paymentWebhook: Boolean(env.RAZORPAY_WEBHOOK_SECRET),
       },
     });
   });
