@@ -4,6 +4,7 @@ import type { Express } from 'express';
 import { cityCreateSchema } from '@nexus/shared';
 import { createAdmin, resetDb, seedJaipur, signIn, startDb, stopDb } from './helpers.js';
 import { applySeoCopy, SEO_COPY } from '../src/scripts/seo-copy.js';
+import { City } from '../src/models/misc.models.js';
 
 let app: Express;
 
@@ -81,6 +82,40 @@ describe('buy and rent page copy', () => {
     expect(c.localities.find((l: { slug: string }) => l.slug === 'vaishali-nagar').buySeo.h1).toBe(
       vn.buySeo.h1,
     );
+  });
+
+  it('upgrades older auto copy word for word, but never an edited page', async () => {
+    const entry = SEO_COPY.find((e) => e.city === 'jaipur')!;
+    const man = entry.localities['mansarovar']!;
+    const old = { title: 'Old', description: 'Old', h1: 'Old' };
+    await City.create({
+      name: 'Jaipur',
+      slug: 'jaipur',
+      state: 'Rajasthan',
+      buySeo: { title: 'Kept' },
+      rentSeo: { title: 'Kept' },
+      localities: [
+        {
+          name: 'Mansarovar',
+          slug: 'mansarovar',
+          // Buy still has the old batch text (extra spaces are ignored); rent was edited in Admin.
+          buySeo: { ...old, intro: `  ${man.upgradeFrom!.buySeo!}  ` },
+          rentSeo: { ...old, intro: `${man.upgradeFrom!.rentSeo!} Edited.` },
+        },
+        { name: 'Jawahar Nagar', slug: 'jawahar-nagar' },
+      ],
+    });
+    expect((await applySeoCopy()).sort()).toEqual(
+      ['buy/jaipur/mansarovar', 'buy/jaipur/jawahar-nagar', 'rent/jaipur/jawahar-nagar'].sort(),
+    );
+    const c = await jaipur();
+    const m = c.localities.find((l: { slug: string }) => l.slug === 'mansarovar');
+    expect(m.buySeo.intro).toBe(man.buySeo.intro);
+    expect(m.rentSeo.intro).toContain('Edited.');
+    const jn = c.localities.find((l: { slug: string }) => l.slug === 'jawahar-nagar');
+    expect(jn.rentSeo.h1).toContain('Jawahar Nagar');
+    // Running again changes nothing.
+    expect(await applySeoCopy()).toEqual([]);
   });
 
   it('skips cities and localities that do not exist', async () => {
