@@ -5,13 +5,13 @@ import { env, isTest } from '../config/env.js';
  *
  * While TEST_OTP_ON is true, EVERY phone number gets the fixed code
  * TEST_OTP_CODE and no SMS is sent. Anyone who knows the code can sign in as
- * any number, so turn it off before real users arrive. The owner asked for it
- * to stay on until he says otherwise, so there is no automatic expiry.
+ * any number.
  *
- * To turn it off: set TEST_OTP_ON to false below and deploy, or set
- * TEST_OTP_UNTIL to a past date in the API .env and restart the API.
+ * Turned OFF on 2026-11-23 at the owner's request: every code now goes by SMS (MSG91).
+ * For a short test window again, set TEST_OTP_UNTIL to a future date in the API .env
+ * and restart the API.
  */
-const TEST_OTP_ON = true;
+const TEST_OTP_ON = false;
 
 export const TEST_OTP_CODE = '123456';
 
