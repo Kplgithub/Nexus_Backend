@@ -31,6 +31,14 @@ appendonly no
 EOF
 grep -q 'conf.d/nexus.conf' "$CONF" || echo 'include /etc/redis/conf.d/nexus.conf' >> "$CONF"
 
+# Redis runs as its own user and must be able to read the drop-in (umask 077 above made it root-only).
+chmod 755 /etc/redis/conf.d
+chgrp redis /etc/redis/conf.d/nexus.conf
+chmod 640 /etc/redis/conf.d/nexus.conf
+# Lets Redis fork safely under memory pressure.
+sysctl -w vm.overcommit_memory=1 >/dev/null
+echo 'vm.overcommit_memory = 1' > /etc/sysctl.d/99-redis.conf
+
 systemctl enable redis-server >/dev/null 2>&1 || true
 systemctl restart redis-server
 sleep 1
