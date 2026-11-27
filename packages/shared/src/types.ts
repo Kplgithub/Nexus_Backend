@@ -1103,3 +1103,75 @@ export type AdminSupportCounts = {
   statuses: Record<SupportStatus | 'all', number>;
   stats: { open: number; inProgress: number; resolved7d: number; avgFirstReplyMins: number | null };
 };
+
+/* ---------------- User journey & acquisition analytics ---------------- */
+
+export type JourneyStepStat = {
+  step: string;
+  label: string;
+  stepIndex: number;
+  reached: number;
+  /** Visitors whose furthest step in this flow was this step (stopped here). */
+  stoppedHere: number;
+  /** Percentage of visitors reaching this step who did not continue to the next step (0-100). */
+  dropOffRate: number;
+};
+
+export type JourneyFlowSummary = {
+  flow: import('./constants.js').JourneyFlow;
+  label: string;
+  started: number;
+  completed: number;
+  completionRate: number;
+  /** Step id where users stop most often in this flow, or null when no drop-offs. */
+  topDropOffStep: string | null;
+  topDropOffLabel: string | null;
+  steps: JourneyStepStat[];
+};
+
+export type JourneySourceGroup = {
+  source: import('./constants.js').JourneySource;
+  label: string;
+  visitors: number;
+  sessions: number;
+  signups: number;
+  listings: number;
+  enquiries: number;
+  /** Percentage of sessions that completed at least one conversion action (0-100). */
+  conversionRate: number;
+};
+
+export type JourneyDailyPoint = {
+  /** YYYY-MM-DD, India time. */
+  date: string;
+  invite: number;
+  search: number;
+  direct: number;
+  social: number;
+  other: number;
+};
+
+export type JourneyInviteRow = {
+  code: string;
+  visitors: number;
+  signups: number;
+  conversionRate: number;
+};
+
+export type JourneyAnalytics = {
+  range: { days: number; from: string; to: string };
+  totals: {
+    visitors: number;
+    sessions: number;
+    inviteVisitors: number;
+    searchVisitors: number;
+    completedFlows: number;
+    topDropOffFlow: string | null;
+    topDropOffStep: string | null;
+    topDropOffRate: number;
+  };
+  dailyBySource: JourneyDailyPoint[];
+  sourceGroups: JourneySourceGroup[];
+  flows: JourneyFlowSummary[];
+  topInvites: JourneyInviteRow[];
+};

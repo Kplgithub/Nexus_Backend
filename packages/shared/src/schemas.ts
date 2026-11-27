@@ -1570,3 +1570,32 @@ export const adminSupportQuerySchema = z.object({
   page: queryNumber(1, 10_000).transform((v) => v ?? 1),
   limit: queryNumber(1, 100).transform((v) => v ?? 30),
 });
+
+/* ------------------------------------------------------------------ */
+/* User journey & acquisition tracking                                 */
+/* ------------------------------------------------------------------ */
+
+export const journeyEventSchema = z.object({
+  sessionId: z.string().trim().min(6).max(64),
+  visitorId: z.string().trim().min(6).max(64),
+  source: z.enum(['invite', 'search', 'direct', 'social', 'other']),
+  inviteCode: z.string().trim().max(64).optional(),
+  searchEngine: z.string().trim().max(64).optional(),
+  flow: z.enum(['signup', 'listing', 'browse']),
+  step: z.string().trim().min(1).max(64),
+  stepIndex: z.number().int().min(0).max(20),
+  totalSteps: z.number().int().min(1).max(20),
+  completed: z.boolean().optional(),
+  path: z.string().trim().max(500).optional(),
+  referrer: z.string().trim().max(1000).optional(),
+});
+export type JourneyEventInput = z.output<typeof journeyEventSchema>;
+
+export const journeyAnalyticsQuerySchema = z.object({
+  days: queryNumber(1, 365).transform((v) => v ?? 30),
+  source: z
+    .enum(['all', 'invite', 'search', 'direct', 'social', 'other'])
+    .optional()
+    .default('all'),
+  flow: z.enum(['all', 'signup', 'listing', 'browse']).optional().default('all'),
+});
