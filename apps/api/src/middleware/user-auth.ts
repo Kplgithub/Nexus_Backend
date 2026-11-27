@@ -1,3 +1,4 @@
+import { cached } from '../lib/redis.js';
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { canListProperty, type UserRole } from '@nexus/shared';
@@ -67,9 +68,12 @@ async function resolveUser(req: Request): Promise<{ user: AuthedUser; csrf: stri
   } catch {
     return null;
   }
-  const u = await User.findById(claims.sub)
-    .select('role name email phone phoneVerified status tokenVersion')
-    .lean();
+  // Redis keeps this lookup off the database for 30 s; any change to a user clears it at once.
+  const u = await cached('user', `u:${String(claims.sub)}`, 30, () =>
+    User.findById(claims.sub)
+      .select('role name email phone phoneVerified status tokenVersion')
+      .lean(),
+  );
   if (!u || u.status !== 'active' || u.tokenVersion !== claims.tv) return null;
   return {
     user: {

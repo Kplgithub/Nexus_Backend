@@ -1,5 +1,6 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 import { OTP_PURPOSES, USER_ROLES, USER_STATUSES, VERIFICATION_STATUSES } from '@nexus/shared';
+import { bumpCache } from '../lib/redis.js';
 import { refreshWebsiteOnWrite } from '../lib/web-revalidate.js';
 
 /**
@@ -84,6 +85,25 @@ userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1, status: 1, createdAt: -1 });
 userSchema.index({ role: 1, verificationStatus: 1, createdAt: -1 });
 userSchema.index({ profileSlug: 1 }, { unique: true, sparse: true });
+
+// Sign-in checks are cached in Redis for a few seconds; any user write clears that cache.
+const dropUserCache = () => bumpCache('user');
+userSchema.post('save', dropUserCache);
+userSchema.post('insertMany', dropUserCache);
+userSchema.post(
+  [
+    'updateOne',
+    'updateMany',
+    'findOneAndUpdate',
+    'replaceOne',
+    'deleteOne',
+    'deleteMany',
+    'findOneAndDelete',
+  ],
+  { document: false, query: true },
+  dropUserCache,
+);
+userSchema.post('deleteOne', { document: true, query: false }, dropUserCache);
 
 // Removing a poster (e.g. demo agents) must drop their public profile right away.
 refreshWebsiteOnWrite(userSchema, ['profiles', 'properties'], { deletesOnly: true });

@@ -29,7 +29,7 @@ jobs:
 
       # Payment and SMS keys live only in GitHub secrets and the server .env, never in the repo.
       # Each key is written only when its secret is set; the others stay as they are.
-      - name: Put Razorpay and SMS keys in the server .env
+      - name: Put Razorpay, SMS and Redis keys in the server .env
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
           USER: ${{ secrets.DEPLOY_USER }}
@@ -38,6 +38,7 @@ jobs:
           RZP_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
           RZP_WEBHOOK: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
           BULKSMS_KEY: ${{ secrets.BULKSMS_AUTH_KEY }}
+          REDIS: ${{ secrets.REDIS_URL }}
         run: |
           lines=''
           if [ -n "$RZP_ID" ]; then lines="${lines}RAZORPAY_KEY_ID=${RZP_ID}"$'\n'; fi
@@ -45,6 +46,8 @@ jobs:
           if [ -n "$RZP_WEBHOOK" ]; then lines="${lines}RAZORPAY_WEBHOOK_SECRET=${RZP_WEBHOOK}"$'\n'; fi
           # With a BulkSMS key, OTP SMS go through BulkSMS instead of MSG91.
           if [ -n "$BULKSMS_KEY" ]; then lines="${lines}BULKSMS_AUTH_KEY=${BULKSMS_KEY}"$'\n'"SMS_DRIVER=bulksms"$'\n'; fi
+          # Optional Redis cache on this server. Unset = the site works exactly as before.
+          if [ -n "$REDIS" ]; then lines="${lines}REDIS_URL=${REDIS}"$'\n'; fi
           if [ -z "$lines" ]; then
             echo 'Razorpay and SMS secrets not set, skipping'
             exit 0

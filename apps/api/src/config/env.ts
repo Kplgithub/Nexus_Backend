@@ -86,6 +86,8 @@ const envSchema = z
     /** Shared secret Next.js sends when revalidating; optional. */
     REVALIDATE_URL: z.string().optional(),
     REVALIDATE_SECRET: z.string().optional(),
+    /** Optional Redis (e.g. redis://:password@127.0.0.1:6379). Unset = everything stays in memory / database. */
+    REDIS_URL: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {

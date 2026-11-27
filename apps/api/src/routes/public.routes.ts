@@ -22,6 +22,7 @@ import { limiters } from '../middleware/security.js';
 import { created, ok, paginate } from '../lib/respond.js';
 import { notFound } from '../lib/errors.js';
 import { hashIp } from '../lib/crypto.js';
+import { cached } from '../lib/redis.js';
 import { optionalUser } from '../middleware/user-auth.js';
 import * as properties from '../services/property.service.js';
 import * as locations from '../services/location.service.js';
@@ -48,7 +49,9 @@ const cache = (res: Response, seconds = env.PUBLIC_CACHE_SECONDS) =>
 
 publicRouter.get('/properties', async (req, res) => {
   const q = parseQuery(propertySearchSchema, req);
-  const { items, meta } = await properties.searchPublic(q);
+  const { items, meta } = await cached('public', `properties:${JSON.stringify(q)}`, 60, () =>
+    properties.searchPublic(q),
+  );
   cache(res);
   ok(res, items, meta);
 });
@@ -63,7 +66,9 @@ publicRouter.get('/smart-search', limiters.smartSearch, async (req, res) => {
 publicRouter.get('/properties/:slug', async (req, res) => {
   const slug = String(req.params.slug).toLowerCase();
   if (!SLUG_PATTERN.test(slug) || slug.length > 100) throw notFound('Property not found');
-  const result = await properties.getPublicBySlug(slug);
+  const result = await cached('public', `property:${slug}`, 60, () =>
+    properties.getPublicBySlug(slug),
+  );
   cache(res);
   if (result.kind === 'redirect') {
     // The web app turns this into a permanent (308) redirect for crawlers.
@@ -85,13 +90,16 @@ publicRouter.get('/home', async (req, res) => {
   const raw = String(req.query.city ?? '').toLowerCase();
   const city = raw && SLUG_PATTERN.test(raw) && raw.length <= 60 ? raw : undefined;
   cache(res);
-  const [sections, newProjects] = await Promise.all([
-    properties.listHomeSections(city),
-    (await projectsOn())
-      ? projects.searchProjects({ page: 1, limit: 6, ...(city ? { city } : {}) })
-      : { items: [] },
-  ]);
-  ok(res, { ...sections, projects: newProjects.items });
+  const data = await cached('public', `home:${city ?? ''}`, 60, async () => {
+    const [sections, newProjects] = await Promise.all([
+      properties.listHomeSections(city),
+      (await projectsOn())
+        ? projects.searchProjects({ page: 1, limit: 6, ...(city ? { city } : {}) })
+        : { items: [] },
+    ]);
+    return { ...sections, projects: newProjects.items };
+  });
+  ok(res, data);
 });
 
 /* ---------------- New projects ---------------- */
@@ -104,7 +112,9 @@ async function requireProjects() {
 publicRouter.get('/projects', async (req, res) => {
   const q = parseQuery(projectSearchSchema, req);
   if (!(await projectsOn())) return ok(res, [], paginate(q.page, q.limit, 0));
-  const { items, meta } = await projects.searchProjects(q);
+  const { items, meta } = await cached('public', `projects:${JSON.stringify(q)}`, 60, () =>
+    projects.searchProjects(q),
+  );
   cache(res);
   ok(res, items, meta);
 });
