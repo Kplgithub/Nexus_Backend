@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
@@ -198,3 +199,29 @@ export const userListing = (overrides: Record<string, unknown> = {}) => ({
   images: [IMG],
   ...overrides,
 });
+
+/**
+ * Answers Razorpay API calls from a table of path → JSON body (first matching prefix wins,
+ * longest first). Other URLs go to the real fetch. Returns the Razorpay calls made.
+ */
+export function mockRazorpay(
+  routes: Record<string, unknown | ((body: unknown) => unknown)>,
+  status: Record<string, number> = {},
+) {
+  const realFetch = globalThis.fetch;
+  const calls: { method: string; path: string; body: unknown }[] = [];
+  const keys = Object.keys(routes).sort((a, b) => b.length - a.length);
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.startsWith('https://api.razorpay.com/v1')) return realFetch(input, init);
+    const path = url.slice('https://api.razorpay.com/v1'.length);
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ method: init?.method ?? 'GET', path, body });
+    const key = keys.find((k) => path.startsWith(k));
+    if (!key) return new Response('{"error":"not mocked"}', { status: 404 });
+    const value = routes[key];
+    const json = typeof value === 'function' ? (value as (b: unknown) => unknown)(body) : value;
+    return new Response(JSON.stringify(json), { status: status[key] ?? 200 });
+  });
+  return calls;
+}

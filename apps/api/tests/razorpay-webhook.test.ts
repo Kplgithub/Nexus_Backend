@@ -20,6 +20,7 @@ import {
   stopDb,
   userListing,
   ADMIN,
+  mockRazorpay,
 } from './helpers.js';
 import { Payment } from '../src/models/admin-panel.models.js';
 import { Property } from '../src/models/property.model.js';
@@ -73,9 +74,7 @@ async function startPlanCheckout() {
     (p: { price: number }) => p.price === 999,
   );
   const orderId = `order_${++orderSeq}`;
-  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-    new Response(JSON.stringify({ id: orderId }), { status: 200 }),
-  );
+  mockRazorpay({ '/orders': { id: orderId }, '/customers': { id: 'cust_1' } });
   const co = await agent.post(`/api/v1/me/plans/${plan.id}/checkout`);
   expect(co.status).toBe(200);
   expect(co.body.data).toMatchObject({ orderId, keyId: 'rzp_test_key', amount: 99_900 });
@@ -163,9 +162,7 @@ describe('Razorpay webhook', () => {
     const { id } = (await agent.post('/api/v1/me/properties', userListing({ status: 'pending' })))
       .body.data;
     await boss.post(`/api/v1/admin/properties/${id}/status`, { status: 'published' });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'order_feat' }), { status: 200 }),
-    );
+    mockRazorpay({ '/orders': { id: 'order_feat' }, '/customers': { id: 'cust_1' } });
     const co = await agent.post(`/api/v1/me/properties/${id}/feature-checkout`, { days: 7 });
     expect(co.status).toBe(200);
     const res = await hook(event('payment.captured', 'order_feat', 'pay_f', co.body.data.amount));

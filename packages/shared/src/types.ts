@@ -6,6 +6,7 @@ import type {
   AlertEvent,
   PaymentKind,
   PaymentMethod,
+  AutopayStatus,
   PaymentStatus,
   SiteVisitStatus,
   VerificationStatus,
@@ -931,6 +932,8 @@ export type Payment = {
   endsAt: string | null;
   /** Set once the payment is paid, e.g. NX/2026-27/0001. */
   invoiceNo: string | null;
+  /** True when an auto-renew (card mandate or UPI Autopay) took this payment. */
+  autopay: boolean;
   createdAt: string;
 };
 
@@ -1002,7 +1005,35 @@ export type CheckoutOrder = {
   currency: 'INR';
   planName: string;
   prefill: { name: string; email: string; contact: string };
+  /** Razorpay customer: lets checkout save the card for next time. */
+  customerId: string | null;
 };
+
+/** Starts a plan with auto-renew: Razorpay checkout opens on this subscription. */
+export type AutopayCheckout = {
+  subscriptionId: string;
+  keyId: string;
+  amount: number;
+  currency: 'INR';
+  planName: string;
+  prefill: { name: string; email: string; contact: string };
+  customerId: string;
+};
+
+/** The user's plan auto-renew, shown on Plan & usage. */
+export type MyAutopay = {
+  id: string;
+  status: AutopayStatus;
+  planName: string;
+  amount: number;
+  durationDays: number;
+  /** 'card' or 'upi' once the first payment went through. */
+  method: 'card' | 'upi' | null;
+  /** e.g. "Visa •••• 4242" or "name@okhdfc". */
+  methodLabel: string | null;
+  nextChargeAt: string | null;
+  createdAt: string;
+} | null;
 
 export type AdminNotification = {
   id: string;

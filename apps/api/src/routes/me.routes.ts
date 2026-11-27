@@ -14,6 +14,7 @@ import {
   projectCreateSchema,
   projectUpdateSchema,
   PROJECT_STATUSES,
+  autopayVerifySchema,
   paymentVerifySchema,
   featureAddonSchema,
   supportReplySchema,
@@ -287,6 +288,7 @@ meRouter.get('/plans', async (req, res) => {
   ok(res, {
     plans,
     subscription,
+    autopay: await billing.myAutopay(req.user!.id),
     payments,
     usage,
     featureAddons: await billing.featureAddons(),
@@ -296,6 +298,19 @@ meRouter.get('/plans', async (req, res) => {
 
 meRouter.post('/plans/:id/checkout', limiters.userWrite, async (req, res) =>
   ok(res, await billing.createCheckout(req.user!.id, parseId(req))),
+);
+
+/* Auto-renew: card mandate or UPI Autopay through a Razorpay subscription. */
+meRouter.post('/plans/:id/autopay', limiters.userWrite, async (req, res) =>
+  ok(res, await billing.createAutopayCheckout(req.user!.id, parseId(req))),
+);
+
+meRouter.post('/autopay/verify', limiters.userWrite, async (req, res) =>
+  ok(res, await billing.confirmAutopay(req.user!.id, parseBody(autopayVerifySchema, req))),
+);
+
+meRouter.post('/autopay/cancel', limiters.userWrite, async (req, res) =>
+  ok(res, await billing.cancelAutopay(req.user!.id, 'user')),
 );
 
 meRouter.post('/properties/:id/feature-checkout', limiters.userWrite, async (req, res) => {

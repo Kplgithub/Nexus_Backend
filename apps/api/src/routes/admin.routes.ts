@@ -603,6 +603,13 @@ adminRouter.post('/payments/:id/refund', requireRole('admin'), async (req, res) 
   ok(res, p);
 });
 
+adminRouter.post('/payments/:id/stop-autopay', requireRole('admin'), async (req, res) => {
+  const id = parseId(req);
+  const p = await billing.cancelAutopayForPayment(id, req.admin!.name);
+  await audit(req.admin, 'stop-autopay', 'payment', id, p.plan.name);
+  ok(res, p);
+});
+
 /* ---------------- Website users ---------------- */
 
 adminRouter.get('/users', async (req, res) => {
