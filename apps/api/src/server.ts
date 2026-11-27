@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { connectDb, disconnectDb } from './db.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
+import { closeRedis, withLock } from './lib/redis.js';
 import { expireFeatured } from './services/featured.service.js';
 import { ensureDefaultPlan, sendPlanReminders, syncPlanPerks } from './services/billing.service.js';
 import { migrateSeekers } from './services/user.service.js';
@@ -22,10 +23,13 @@ async function main() {
     .catch((err) => logger.warn({ err }, 'seeker migration'));
 
   // Featured placements end on their date; plan-ending reminders go out.
+  // Only one server process runs the sweep at a time (a Redis lock), so adding processes never doubles reminders.
   const sweep = () => {
-    void expireFeatured().catch((err) => logger.warn({ err }, 'expire sweep'));
-    void sendPlanReminders().catch((err) => logger.warn({ err }, 'plan reminders'));
-    void syncPlanPerks().catch((err) => logger.warn({ err }, 'plan perks'));
+    void withLock('sweep', 540, async () => {
+      void expireFeatured().catch((err) => logger.warn({ err }, 'expire sweep'));
+      void sendPlanReminders().catch((err) => logger.warn({ err }, 'plan reminders'));
+      void syncPlanPerks().catch((err) => logger.warn({ err }, 'plan perks'));
+    });
   };
   sweep();
   setInterval(sweep, 10 * 60_000).unref();
@@ -41,6 +45,7 @@ async function main() {
     }, 15_000);
     force.unref();
     server.close(async () => {
+      await closeRedis().catch(() => undefined);
       await disconnectDb().catch(() => undefined);
       logger.info('Shutdown complete');
       process.exit(0);

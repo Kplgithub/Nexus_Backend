@@ -33,6 +33,10 @@ Never commit real values. Development: `apps/api/.env`, `apps/web/.env.local`. P
 
 Seed-script-only (pass on the command line, never store): `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_ROLE`, `ADMIN_PASSWORD` (omit to be prompted).
 
+### Redis (optional)
+
+`REDIS_URL` (e.g. `redis://:password@127.0.0.1:6379`). Unset = no Redis: everything stays in memory and the database, exactly as before. When set, Redis holds: public listing/home/project answers (60 s, cleared the moment a listing, project, user-profile or setting changes), the signed-in user check (30 s, cleared on any user change), rate-limit counters (shared by all processes, survive deploys) and a lock so the background sweep runs on one process only. If Redis is down or slow (>200 ms) every helper falls back silently; rate limits keep counting in memory. Install on the server once with `sudo bash scripts/setup-redis.sh`, then add the printed URL as the GitHub secret `REDIS_URL`; the deploy workflow writes it into `apps/api/.env`.
+
 ## Web (`apps/web`)
 
 | Variable               | Required | Purpose                                                                      |

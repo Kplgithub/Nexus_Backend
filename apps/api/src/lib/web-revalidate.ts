@@ -1,6 +1,7 @@
 import type { Schema } from 'mongoose';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
+import { bumpCache } from './redis.js';
 
 /**
  * Tells the website to drop its cached copy of public data as soon as it
@@ -53,6 +54,8 @@ function flushNow() {
 }
 
 export function refreshWebsite(...tags: WebTag[]) {
+  // Cached API answers (Redis) go stale on the same events as the website's own cache.
+  bumpCache('public');
   if (!targetUrl()) return;
   for (const t of tags) pending.add(t);
   if (!timer) {
