@@ -49,6 +49,8 @@ const userSchema = new Schema(
     verificationNote: { type: String, maxlength: 1000, default: null },
     /** End of the user's paid plan (the latest one). Shows the Premium badge until then. */
     premiumUntil: { type: Date, default: null },
+    /** Razorpay customer: saved cards and auto-renew mandates hang off it. */
+    razorpayCustomerId: { type: String, default: null },
     /** Free listings used, ever. Deleting a listing does not give the slot back. */
     freePostsUsed: { type: Number, default: 0 },
     /** What they said they were when they signed up from the "view number" popup. */

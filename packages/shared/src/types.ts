@@ -6,6 +6,7 @@ import type {
   AlertEvent,
   PaymentKind,
   PaymentMethod,
+  AutopayStatus,
   PaymentStatus,
   SiteVisitStatus,
   VerificationStatus,
@@ -931,6 +932,8 @@ export type Payment = {
   endsAt: string | null;
   /** Set once the payment is paid, e.g. NX/2026-27/0001. */
   invoiceNo: string | null;
+  /** True when an auto-renew (card mandate or UPI Autopay) took this payment. */
+  autopay: boolean;
   createdAt: string;
 };
 
@@ -1002,7 +1005,35 @@ export type CheckoutOrder = {
   currency: 'INR';
   planName: string;
   prefill: { name: string; email: string; contact: string };
+  /** Razorpay customer: lets checkout save the card for next time. */
+  customerId: string | null;
 };
+
+/** Starts a plan with auto-renew: Razorpay checkout opens on this subscription. */
+export type AutopayCheckout = {
+  subscriptionId: string;
+  keyId: string;
+  amount: number;
+  currency: 'INR';
+  planName: string;
+  prefill: { name: string; email: string; contact: string };
+  customerId: string;
+};
+
+/** The user's plan auto-renew, shown on Plan & usage. */
+export type MyAutopay = {
+  id: string;
+  status: AutopayStatus;
+  planName: string;
+  amount: number;
+  durationDays: number;
+  /** 'card' or 'upi' once the first payment went through. */
+  method: 'card' | 'upi' | null;
+  /** e.g. "Visa •••• 4242" or "name@okhdfc". */
+  methodLabel: string | null;
+  nextChargeAt: string | null;
+  createdAt: string;
+} | null;
 
 export type AdminNotification = {
   id: string;
@@ -1071,4 +1102,76 @@ export type AdminSupportCounts = {
   /** Tickets per status for the chosen role ("all" = every status). */
   statuses: Record<SupportStatus | 'all', number>;
   stats: { open: number; inProgress: number; resolved7d: number; avgFirstReplyMins: number | null };
+};
+
+/* ---------------- User journey & acquisition analytics ---------------- */
+
+export type JourneyStepStat = {
+  step: string;
+  label: string;
+  stepIndex: number;
+  reached: number;
+  /** Visitors whose furthest step in this flow was this step (stopped here). */
+  stoppedHere: number;
+  /** Percentage of visitors reaching this step who did not continue to the next step (0-100). */
+  dropOffRate: number;
+};
+
+export type JourneyFlowSummary = {
+  flow: import('./constants.js').JourneyFlow;
+  label: string;
+  started: number;
+  completed: number;
+  completionRate: number;
+  /** Step id where users stop most often in this flow, or null when no drop-offs. */
+  topDropOffStep: string | null;
+  topDropOffLabel: string | null;
+  steps: JourneyStepStat[];
+};
+
+export type JourneySourceGroup = {
+  source: import('./constants.js').JourneySource;
+  label: string;
+  visitors: number;
+  sessions: number;
+  signups: number;
+  listings: number;
+  enquiries: number;
+  /** Percentage of sessions that completed at least one conversion action (0-100). */
+  conversionRate: number;
+};
+
+export type JourneyDailyPoint = {
+  /** YYYY-MM-DD, India time. */
+  date: string;
+  invite: number;
+  search: number;
+  direct: number;
+  social: number;
+  other: number;
+};
+
+export type JourneyInviteRow = {
+  code: string;
+  visitors: number;
+  signups: number;
+  conversionRate: number;
+};
+
+export type JourneyAnalytics = {
+  range: { days: number; from: string; to: string };
+  totals: {
+    visitors: number;
+    sessions: number;
+    inviteVisitors: number;
+    searchVisitors: number;
+    completedFlows: number;
+    topDropOffFlow: string | null;
+    topDropOffStep: string | null;
+    topDropOffRate: number;
+  };
+  dailyBySource: JourneyDailyPoint[];
+  sourceGroups: JourneySourceGroup[];
+  flows: JourneyFlowSummary[];
+  topInvites: JourneyInviteRow[];
 };

@@ -1,5 +1,6 @@
 import { Schema, model } from 'mongoose';
 import {
+  AUTOPAY_STATUSES,
   PAYMENT_KINDS,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
@@ -67,6 +68,15 @@ const planSchema = new Schema(
     roles: { type: [String], enum: USER_ROLES, default: [] },
     active: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
+    /**
+     * The Razorpay plan auto-renew uses, made for this price and length. A price change
+     * makes a new one; people already on auto-renew keep the price they signed up at.
+     */
+    razorpayPlan: {
+      id: { type: String, default: null },
+      price: { type: Number, default: null },
+      durationDays: { type: Number, default: null },
+    },
   },
   { timestamps: true },
 );
@@ -111,6 +121,8 @@ const paymentSchema = new Schema(
     invoiceNo: { type: String, default: null },
     /** Set once the "your plan ends soon" reminder went out. */
     reminderSentAt: { type: Date, default: null },
+    /** Razorpay subscription that charged this payment (auto-renew). */
+    subscriptionId: { type: String, default: null },
   },
   { timestamps: true },
 );
@@ -121,11 +133,48 @@ paymentSchema.index(
   { orderId: 1 },
   { unique: true, partialFilterExpression: { orderId: { $type: 'string' } } },
 );
+// One row per Razorpay payment: browser verify and webhook can arrive together.
+paymentSchema.index(
+  { paymentId: 1 },
+  { unique: true, partialFilterExpression: { paymentId: { $type: 'string' } } },
+);
 paymentSchema.index(
   { invoiceNo: 1 },
   { unique: true, partialFilterExpression: { invoiceNo: { $type: 'string' } } },
 );
 export const Payment = model('Payment', paymentSchema);
+
+/** A plan's auto-renew: one Razorpay subscription (card mandate or UPI Autopay). */
+const autopaySchema = new Schema(
+  {
+    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    plan: { type: Schema.Types.ObjectId, ref: 'Plan', required: true },
+    planSnapshot: {
+      name: String,
+      durationDays: Number,
+      listingLimit: Number,
+      featuredListings: Number,
+      featuredDays: Number,
+      leadLimit: Number,
+      searchRank: Number,
+      partnerBadge: Boolean,
+      autoRefreshDays: Number,
+    },
+    amount: { type: Number, required: true, min: 1 },
+    subscriptionId: { type: String, required: true, unique: true },
+    status: { type: String, enum: AUTOPAY_STATUSES, default: 'created' },
+    method: { type: String, enum: ['card', 'upi', null], default: null },
+    methodLabel: { type: String, maxlength: 80, default: null },
+    nextChargeAt: { type: Date, default: null },
+    /** When the plan was kept on after a failed debit, and the end it had before. */
+    graceFrom: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: String, default: null },
+  },
+  { timestamps: true },
+);
+autopaySchema.index({ user: 1, status: 1, createdAt: -1 });
+export const Autopay = model('Autopay', autopaySchema);
 
 /* ---------------- Admin notifications (the bell) ---------------- */
 const notificationSchema = new Schema(

@@ -719,6 +719,20 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export const PAYMENT_METHODS = ['online', 'manual'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+/** Razorpay subscription states for a plan's auto-renew (card mandate or UPI Autopay). */
+export const AUTOPAY_STATUSES = [
+  'created',
+  'authenticated',
+  'active',
+  'pending',
+  'halted',
+  'cancelled',
+  'completed',
+] as const;
+export type AutopayStatus = (typeof AUTOPAY_STATUSES)[number];
+/** Days a plan stays on after an auto-renew debit fails, while Razorpay retries. */
+export const AUTOPAY_GRACE_DAYS = 3;
+
 export const ALERT_EVENTS = [
   'lead',
   'listing',
@@ -849,3 +863,52 @@ export const ADMIN_PATH = '/nx-tx298a2v';
 export function adminHref(path: string): string {
   return /^\/admin(?=$|[/?#])/.test(path) ? ADMIN_PATH + path.slice('/admin'.length) : path;
 }
+
+/* ---------------- User journey & acquisition tracking ---------------- */
+
+/** How a visitor arrived on the site. */
+export const JOURNEY_SOURCES = ['invite', 'search', 'direct', 'social', 'other'] as const;
+export type JourneySource = (typeof JOURNEY_SOURCES)[number];
+
+export const JOURNEY_SOURCE_LABELS: Record<JourneySource, string> = {
+  invite: 'Invite link',
+  search: 'Search',
+  direct: 'Direct',
+  social: 'Social',
+  other: 'Other',
+};
+
+/** Multi-step flows tracked for drop-off analysis. */
+export const JOURNEY_FLOWS = ['signup', 'listing', 'browse'] as const;
+export type JourneyFlow = (typeof JOURNEY_FLOWS)[number];
+
+export const JOURNEY_FLOW_LABELS: Record<JourneyFlow, string> = {
+  signup: 'Account sign-up',
+  listing: 'Post property',
+  browse: 'Browse & enquiry',
+};
+
+export const JOURNEY_FLOW_STEPS: Record<JourneyFlow, readonly { id: string; label: string }[]> = {
+  signup: [
+    { id: 'role', label: 'Choose account type' },
+    { id: 'details', label: 'Enter details' },
+    { id: 'verify', label: 'Verify mobile OTP' },
+    { id: 'completed', label: 'Account created' },
+  ],
+  listing: [
+    { id: 'basics', label: 'Property basics' },
+    { id: 'location', label: 'Location' },
+    { id: 'price', label: 'Price & terms' },
+    { id: 'details', label: 'Details & rooms' },
+    { id: 'photos', label: 'Photos & description' },
+    { id: 'review', label: 'Review & submit' },
+    { id: 'completed', label: 'Listing submitted' },
+  ],
+  browse: [
+    { id: 'landing', label: 'Landing / Home' },
+    { id: 'search_results', label: 'Search results' },
+    { id: 'property_view', label: 'Property page' },
+    { id: 'enquiry_started', label: 'Started enquiry' },
+    { id: 'enquiry_submitted', label: 'Submitted enquiry' },
+  ],
+};

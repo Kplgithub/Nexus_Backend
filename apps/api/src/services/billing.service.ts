@@ -2,12 +2,16 @@ import crypto from 'node:crypto';
 import { Types, type FilterQuery } from 'mongoose';
 import type { z } from 'zod';
 import {
+  AUTOPAY_GRACE_DAYS,
   DEFAULT_PLAN,
   FEATURE_ADDONS,
   FREE_LEADS_PER_MONTH,
   LISTING_LIMITS,
   PLAN_REMINDER_DAYS,
+  type AutopayCheckout,
+  type AutopayStatus,
   type CheckoutOrder,
+  type MyAutopay,
   type FeatureAddonDays,
   type PlanUsage,
   type MySubscription,
@@ -25,7 +29,7 @@ import { env, razorpayEnabled } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { AppError, badRequest, notFound } from '../lib/errors.js';
 import { escapeRegex, paginate } from '../lib/respond.js';
-import { Payment, Plan } from '../models/admin-panel.models.js';
+import { Autopay, Payment, Plan } from '../models/admin-panel.models.js';
 import { User } from '../models/user.model.js';
 import { Property } from '../models/property.model.js';
 import { City, Counter, Enquiry } from '../models/misc.models.js';
@@ -173,6 +177,7 @@ type PaymentLean = {
   startsAt?: Date | null;
   endsAt?: Date | null;
   invoiceNo?: string | null;
+  subscriptionId?: string | null;
   createdAt: Date;
 };
 
@@ -219,6 +224,7 @@ const toPayment = (p: PaymentLean): PaymentDto => ({
   startsAt: iso(p.startsAt),
   endsAt: iso(p.endsAt),
   invoiceNo: p.invoiceNo ?? null,
+  autopay: Boolean(p.subscriptionId),
   createdAt: p.createdAt.toISOString(),
 });
 
@@ -454,7 +460,9 @@ export async function paymentInvoice(id: string, userId?: string): Promise<Payme
 }
 
 /** A new plan starts when the current one ends, so renewing early never loses days. */
-async function periodFor(userId: Types.ObjectId, durationDays: number) {
+async function periodFor(userId: Types.ObjectId, durationDays: number, startFrom?: Date | null) {
+  if (startFrom)
+    return { startsAt: startFrom, endsAt: new Date(startFrom.getTime() + durationDays * DAY) };
   const current = await Payment.findOne({
     ...PLAN_ONLY,
     user: userId,
@@ -470,12 +478,13 @@ async function periodFor(userId: Types.ObjectId, durationDays: number) {
 
 async function markPaid(
   payment: InstanceType<typeof Payment>,
-  extra: { paymentId?: string; recordedBy?: string },
+  extra: { paymentId?: string; recordedBy?: string; startFrom?: Date | null },
 ) {
   if (payment.kind === 'featured') return markFeaturedPaid(payment, extra);
   const { startsAt, endsAt } = await periodFor(
     payment.user as Types.ObjectId,
     payment.planSnapshot!.durationDays!,
+    extra.startFrom,
   );
   payment.status = 'paid';
   payment.paidAt = new Date();
@@ -492,7 +501,7 @@ async function markPaid(
   const user = await User.findById(payment.user).select('name email').lean();
   void businessAlert('payment', {
     title: `Payment ₹${payment.amount.toLocaleString('en-IN')} from ${user?.name ?? 'a user'}`,
-    body: `${payment.planSnapshot!.name} plan · ${payment.method === 'online' ? 'online' : 'recorded by hand'}`,
+    body: `${payment.planSnapshot!.name} plan · ${payment.subscriptionId ? 'auto-renew' : payment.method === 'online' ? 'online' : 'recorded by hand'}`,
     link: '/admin/payments',
     to: 'super',
   });
@@ -865,6 +874,28 @@ export async function sendPlanReminders(now = new Date()) {
       timeZone: 'Asia/Kolkata',
     });
     const url = `${env.PUBLIC_SITE_URL}/dashboard/plans`;
+    // Auto-renew on: tell them the debit is coming instead of asking them to renew.
+    const auto = await Autopay.findOne({
+      user: p.user,
+      status: { $in: ['active', 'authenticated'] },
+    })
+      .sort({ createdAt: -1 })
+      .select('amount')
+      .lean();
+    if (auto) {
+      void sendMail(
+        user.email,
+        `Your ${p.planSnapshot?.name ?? 'Premium'} plan renews on ${ends}`,
+        [
+          `Hi ${user.name},`,
+          `Auto-renew is on. ₹${auto.amount.toLocaleString('en-IN')} will be taken around ${ends} and your plan will carry on.`,
+          'You can turn auto-renew off any time from Plan & usage.',
+        ],
+        { label: 'Manage auto-renew', url },
+      );
+      sent++;
+      continue;
+    }
     void sendMail(
       user.email,
       `Your ${p.planSnapshot?.name ?? 'Premium'} plan ends on ${ends}`,
@@ -984,7 +1015,7 @@ export async function createFeatureCheckout(
     throw new AppError(503, 'PAYMENTS_OFF', 'Online payment is not available yet. Please call us.');
   const addon = await addonFor(days);
   const [user, prop] = await Promise.all([
-    User.findById(userId).select('name email phone').lean(),
+    User.findById(userId).select(BUYER_FIELDS).lean<BuyerLean>(),
     liveOwnListing(userId, propertyId),
   ]);
   if (!user) throw notFound('Account not found');
@@ -1007,6 +1038,7 @@ export async function createFeatureCheckout(
     currency: 'INR',
     planName: snap.name,
     prefill: { name: user.name, email: user.email, contact: user.phone },
+    customerId: await customerOrNull(user),
   };
 }
 
@@ -1035,33 +1067,79 @@ export async function recordManualFeature(
 
 /* ---------------- Razorpay ---------------- */
 
-async function razorpayOrder(rupees: number, userId: string, notes: Record<string, string>) {
-  const res = await fetch('https://api.razorpay.com/v1/orders', {
-    method: 'POST',
+/** One call to the Razorpay API. Throws a friendly 502 when Razorpay says no. */
+async function rzp<T>(path: string, body?: unknown, method = body ? 'POST' : 'GET'): Promise<T> {
+  const res = await fetch(`https://api.razorpay.com/v1${path}`, {
+    method,
     headers: { Authorization: rzpAuth(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      amount: rupees * 100,
-      currency: 'INR',
-      receipt: `nx-${userId.slice(-8)}-${Date.now().toString(36)}`,
-      notes: { userId, ...notes },
-    }),
+    body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    logger.error({ status: res.status, body: await res.text() }, 'Razorpay order failed');
-    throw new AppError(502, 'PAYMENT_GATEWAY', 'Could not start the payment. Please try again.');
+    const text = await res.text();
+    logger.error({ path, status: res.status, body: text }, 'Razorpay call failed');
+    throw Object.assign(
+      new AppError(502, 'PAYMENT_GATEWAY', 'Could not start the payment. Please try again.'),
+      { rzpStatus: res.status, rzpBody: text },
+    );
   }
-  return (await res.json()) as { id: string };
+  return (await res.json()) as T;
+}
+
+async function razorpayOrder(rupees: number, userId: string, notes: Record<string, string>) {
+  return rzp<{ id: string }>('/orders', {
+    amount: rupees * 100,
+    currency: 'INR',
+    receipt: `nx-${userId.slice(-8)}-${Date.now().toString(36)}`,
+    notes: { userId, ...notes },
+  });
 }
 
 const rzpAuth = () =>
   `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64')}`;
 
+type BuyerLean = {
+  _id: Types.ObjectId;
+  name: string;
+  email: string;
+  phone: string;
+  razorpayCustomerId?: string | null;
+};
+
+/**
+ * The user's Razorpay customer, made once. Saved cards and auto-renew mandates belong
+ * to it; Razorpay keeps the card token, we keep only this id.
+ */
+async function ensureCustomer(user: BuyerLean) {
+  if (user.razorpayCustomerId) return user.razorpayCustomerId;
+  const c = await rzp<{ id: string }>('/customers', {
+    name: user.name.slice(0, 50),
+    email: user.email,
+    contact: user.phone,
+    // An existing customer with the same email/phone comes back instead of an error.
+    fail_existing: '0',
+    notes: { userId: String(user._id) },
+  });
+  await User.updateOne({ _id: user._id }, { $set: { razorpayCustomerId: c.id } });
+  return c.id;
+}
+
+/** For one-time payments the customer is a nicety (saved cards), never a blocker. */
+async function customerOrNull(user: BuyerLean) {
+  try {
+    return await ensureCustomer(user);
+  } catch {
+    return null;
+  }
+}
+
+const BUYER_FIELDS = 'name email phone role razorpayCustomerId';
+
 export async function createCheckout(userId: string, planId: string): Promise<CheckoutOrder> {
   if (!razorpayEnabled)
     throw new AppError(503, 'PAYMENTS_OFF', 'Online payment is not available yet. Please call us.');
   const [user, plan] = await Promise.all([
-    User.findById(userId).select('name email phone role').lean(),
+    User.findById(userId).select(BUYER_FIELDS).lean<BuyerLean & { role: UserRole }>(),
     Plan.findOne({ _id: planId, active: true }).lean<PlanLean>(),
   ]);
   if (!user) throw notFound('Account not found');
@@ -1084,6 +1162,7 @@ export async function createCheckout(userId: string, planId: string): Promise<Ch
     currency: 'INR',
     planName: plan.name,
     prefill: { name: user.name, email: user.email, contact: user.phone },
+    customerId: await customerOrNull(user),
   };
 }
 
@@ -1119,7 +1198,7 @@ export async function confirmCheckout(
  * Turns an open online payment into a paid one exactly once. The browser and the
  * Razorpay webhook can both arrive for the same order, at the same moment.
  */
-async function settleOnline(id: Types.ObjectId, paymentId: string) {
+async function settleOnline(id: Types.ObjectId, paymentId: string, startFrom?: Date | null) {
   const claimed = await Payment.findOneAndUpdate(
     { _id: id, method: 'online', status: { $in: ['created', 'failed'] } },
     { $set: { status: 'paid' } },
@@ -1127,13 +1206,411 @@ async function settleOnline(id: Types.ObjectId, paymentId: string) {
   );
   if (!claimed) return false;
   try {
-    await markPaid(claimed, { paymentId });
+    await markPaid(claimed, { paymentId, startFrom });
   } catch (err) {
     // Not saved yet (paidAt still empty): open the order again so a retry can finish it.
     await Payment.updateOne({ _id: id, paidAt: null }, { $set: { status: 'created' } });
     throw err;
   }
   return true;
+}
+
+/* ---------------- Auto-renew (card mandate / UPI Autopay) ---------------- */
+
+/** Auto-renews that still take money, or may again. */
+const LIVE_AUTOPAY: AutopayStatus[] = ['authenticated', 'active', 'pending'];
+
+type AutopayLean = {
+  _id: Types.ObjectId;
+  user: Types.ObjectId;
+  plan: Types.ObjectId;
+  planSnapshot: PaymentLean['planSnapshot'];
+  amount: number;
+  subscriptionId: string;
+  status: AutopayStatus;
+  method?: 'card' | 'upi' | null;
+  methodLabel?: string | null;
+  nextChargeAt?: Date | null;
+  graceFrom?: Date | null;
+  createdAt: Date;
+};
+
+const toAutopay = (a: AutopayLean): NonNullable<MyAutopay> => ({
+  id: String(a._id),
+  status: a.status,
+  planName: a.planSnapshot?.name ?? 'Premium',
+  amount: a.amount,
+  durationDays: a.planSnapshot?.durationDays ?? 30,
+  method: a.method ?? null,
+  methodLabel: a.methodLabel ?? null,
+  nextChargeAt: iso(a.nextChargeAt),
+  createdAt: a.createdAt.toISOString(),
+});
+
+/** The auto-renew shown on Plan & usage: the latest one that is on, waiting or stopped by the bank. */
+export async function myAutopay(userId: string): Promise<MyAutopay> {
+  const a = await Autopay.findOne({ user: userId, status: { $in: [...LIVE_AUTOPAY, 'halted'] } })
+    .sort({ createdAt: -1 })
+    .lean<AutopayLean>();
+  return a ? toAutopay(a) : null;
+}
+
+/** Razorpay billing period that repeats exactly every `days` days (yearly when it fits). */
+export function razorpayPeriod(days: number) {
+  if (days % 365 === 0) return { period: 'yearly', interval: days / 365 } as const;
+  return { period: 'daily', interval: days } as const;
+}
+
+/** How many debits a mandate allows: about 10 years, at most 100. */
+export const autopayCycles = (days: number) => Math.max(1, Math.min(100, Math.floor(3650 / days)));
+
+/** The Razorpay plan for this admin plan's current price and length, made when missing. */
+async function ensureRazorpayPlan(
+  plan: PlanLean & {
+    razorpayPlan?: {
+      id?: string | null;
+      price?: number | null;
+      durationDays?: number | null;
+    } | null;
+  },
+) {
+  const rp = plan.razorpayPlan;
+  if (rp?.id && rp.price === plan.price && rp.durationDays === plan.durationDays) return rp.id;
+  const made = await rzp<{ id: string }>('/plans', {
+    ...razorpayPeriod(plan.durationDays),
+    item: {
+      name: `NEXUS ${plan.name}`.slice(0, 60),
+      amount: plan.price * 100,
+      currency: 'INR',
+      description: `${plan.durationDays} days`,
+    },
+    notes: { planId: String(plan._id) },
+  });
+  await Plan.updateOne(
+    { _id: plan._id },
+    { $set: { razorpayPlan: { id: made.id, price: plan.price, durationDays: plan.durationDays } } },
+  );
+  return made.id;
+}
+
+/**
+ * Starts a plan with auto-renew. Razorpay checkout opens on a subscription: a card
+ * becomes a saved mandate, UPI becomes UPI Autopay. The first period is paid at once.
+ */
+export async function createAutopayCheckout(
+  userId: string,
+  planId: string,
+): Promise<AutopayCheckout> {
+  if (!razorpayEnabled)
+    throw new AppError(503, 'PAYMENTS_OFF', 'Online payment is not available yet. Please call us.');
+  const [user, plan] = await Promise.all([
+    User.findById(userId).select(BUYER_FIELDS).lean<BuyerLean & { role: UserRole }>(),
+    Plan.findOne({ _id: planId, active: true }).lean<PlanLean>(),
+  ]);
+  if (!user) throw notFound('Account not found');
+  if (!plan || !plan.roles.includes(user.role)) throw notFound('Plan not found');
+  if (plan.price <= 0) throw badRequest('This plan is free and already on for you');
+  if (plan.durationDays < 7) throw badRequest('Auto-renew is not available for this plan');
+  if (await Autopay.exists({ user: user._id, status: { $in: LIVE_AUTOPAY } }))
+    throw badRequest('Auto-renew is already on. Turn it off first to change the plan.');
+
+  const customerId = await ensureCustomer(user);
+  const rzpPlanId = await ensureRazorpayPlan(plan);
+  const sub = await rzp<{ id: string }>('/subscriptions', {
+    plan_id: rzpPlanId,
+    customer_id: customerId,
+    total_count: autopayCycles(plan.durationDays),
+    quantity: 1,
+    customer_notify: 1,
+    notes: { userId: String(user._id), planId: String(plan._id) },
+  });
+  await Autopay.create({
+    user: user._id,
+    plan: plan._id,
+    planSnapshot: snapshotOf(plan),
+    amount: plan.price,
+    subscriptionId: sub.id,
+  });
+  return {
+    subscriptionId: sub.id,
+    keyId: env.RAZORPAY_KEY_ID!,
+    amount: plan.price * 100,
+    currency: 'INR',
+    planName: plan.name,
+    prefill: { name: user.name, email: user.email, contact: user.phone },
+    customerId,
+  };
+}
+
+/** Checkout signs `payment_id|subscription_id` for subscriptions (the reverse of orders). */
+export function subscriptionSignatureValid(
+  paymentId: string,
+  subscriptionId: string,
+  signature: string,
+) {
+  if (!env.RAZORPAY_KEY_SECRET) return false;
+  const expected = crypto
+    .createHmac('sha256', env.RAZORPAY_KEY_SECRET)
+    .update(`${paymentId}|${subscriptionId}`)
+    .digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature.toLowerCase());
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+type RzpPaymentEntity = {
+  id?: string;
+  order_id?: string | null;
+  amount?: number;
+  currency?: string;
+  status?: string;
+  method?: string;
+  vpa?: string | null;
+  upi?: { vpa?: string | null } | null;
+  card?: { network?: string | null; last4?: string | null } | null;
+};
+type RzpSubscriptionEntity = {
+  id?: string;
+  status?: string;
+  charge_at?: number | null;
+  current_end?: number | null;
+};
+
+const fromUnix = (t?: number | null) => (t ? new Date(t * 1000) : null);
+
+/** "Visa •••• 4242" or the UPI ID; null when Razorpay did not say. */
+function methodOf(pay: RzpPaymentEntity) {
+  if (pay.method === 'card') {
+    const label = [pay.card?.network, pay.card?.last4 ? `•••• ${pay.card.last4}` : null]
+      .filter(Boolean)
+      .join(' ');
+    return { method: 'card' as const, methodLabel: label || 'Card' };
+  }
+  if (pay.method === 'upi') {
+    return { method: 'upi' as const, methodLabel: pay.vpa ?? pay.upi?.vpa ?? 'UPI' };
+  }
+  return null;
+}
+
+const AUTOPAY_RANK: Record<AutopayStatus, number> = {
+  created: 0,
+  authenticated: 1,
+  active: 2,
+  pending: 2,
+  halted: 2,
+  cancelled: 3,
+  completed: 3,
+};
+
+/** Moves an auto-renew to a new state; webhooks arrive out of order, so it never goes back. */
+async function setAutopayStatus(
+  a: AutopayLean,
+  status: AutopayStatus,
+  extra: Record<string, unknown> = {},
+) {
+  if (AUTOPAY_RANK[status] < AUTOPAY_RANK[a.status]) return;
+  if (AUTOPAY_RANK[a.status] === 3 && status !== a.status) return;
+  await Autopay.updateOne({ _id: a._id }, { $set: { status, ...extra } });
+}
+
+/**
+ * Books one auto-renew debit as a paid plan payment (own invoice, plan carried on).
+ * Safe to call twice for the same Razorpay payment: browser verify and webhook race.
+ */
+async function settleAutopayCharge(
+  a: AutopayLean,
+  pay: RzpPaymentEntity,
+  sub?: RzpSubscriptionEntity,
+): Promise<WebhookResult> {
+  if (!pay.id) return 'ignored_event';
+  if (pay.status && pay.status !== 'captured') return 'not_captured';
+  if (pay.amount !== Math.round(a.amount * 100) || (pay.currency && pay.currency !== 'INR')) {
+    logger.error(
+      {
+        subscriptionId: a.subscriptionId,
+        paymentId: pay.id,
+        paise: pay.amount,
+        expected: a.amount * 100,
+      },
+      'Razorpay auto-renew amount does not match',
+    );
+    return 'amount_mismatch';
+  }
+  const fields = {
+    user: a.user,
+    kind: 'plan',
+    plan: a.plan,
+    planSnapshot: a.planSnapshot,
+    amount: a.amount,
+    method: 'online',
+    orderId: pay.order_id ?? null,
+    subscriptionId: a.subscriptionId,
+    paymentId: pay.id,
+  };
+  let row = await Payment.findOne({ paymentId: pay.id }).select('_id status').lean();
+  if (!row) {
+    try {
+      row = (await Payment.create({ ...fields, status: 'created' })).toObject();
+    } catch (err) {
+      // The other path made it a moment ago.
+      if ((err as { code?: number }).code !== 11000) throw err;
+      row = await Payment.findOne({
+        $or: [{ paymentId: pay.id }, ...(pay.order_id ? [{ orderId: pay.order_id }] : [])],
+      })
+        .select('_id status')
+        .lean();
+      if (!row) throw err;
+    }
+  }
+  const done = await settleOnline(row._id as Types.ObjectId, pay.id, a.graceFrom ?? null);
+  const how = methodOf(pay);
+  await setAutopayStatus(a, 'active', {
+    ...(how ?? {}),
+    graceFrom: null,
+    ...(sub?.charge_at || sub?.current_end
+      ? { nextChargeAt: fromUnix(sub.charge_at ?? sub.current_end) }
+      : {}),
+  });
+  return done ? 'paid' : 'already_done';
+}
+
+/** Browser call after the auto-renew checkout succeeds. */
+export async function confirmAutopay(
+  userId: string,
+  input: { subscriptionId: string; paymentId: string; signature: string },
+) {
+  const a = await Autopay.findOne({
+    subscriptionId: input.subscriptionId,
+    user: userId,
+  }).lean<AutopayLean>();
+  if (!a) throw notFound('Auto-renew not found');
+  if (!subscriptionSignatureValid(input.paymentId, input.subscriptionId, input.signature))
+    throw badRequest('Payment could not be verified. If money was taken, call us.');
+  await setAutopayStatus(a, 'authenticated');
+  const [pay, sub] = await Promise.all([
+    rzp<RzpPaymentEntity>(`/payments/${encodeURIComponent(input.paymentId)}?expand[]=card`),
+    rzp<RzpSubscriptionEntity>(`/subscriptions/${encodeURIComponent(input.subscriptionId)}`).catch(
+      () => undefined,
+    ),
+  ]);
+  const fresh = (await Autopay.findById(a._id).lean<AutopayLean>()) ?? a;
+  const result = await settleAutopayCharge(fresh, { ...pay, id: input.paymentId }, sub);
+  if (result === 'amount_mismatch')
+    throw badRequest('Payment amount did not match. Please call us.');
+  // 'not_captured': Razorpay is still finishing it; the webhook turns the plan on.
+  return { autopay: await myAutopay(userId), pending: result === 'not_captured' };
+}
+
+/** Stops future debits. The days already paid for stay. */
+export async function cancelAutopay(userId: string, by: string) {
+  const a = await Autopay.findOne({ user: userId, status: { $in: [...LIVE_AUTOPAY, 'halted'] } })
+    .sort({ createdAt: -1 })
+    .lean<AutopayLean>();
+  if (!a) throw badRequest('Auto-renew is already off');
+  try {
+    await rzp(`/subscriptions/${encodeURIComponent(a.subscriptionId)}/cancel`, {
+      cancel_at_cycle_end: 0,
+    });
+  } catch (err) {
+    // Razorpay answers 400 when it is already cancelled or finished there: off either way.
+    if ((err as { rzpStatus?: number }).rzpStatus !== 400) throw err;
+  }
+  await Autopay.updateOne(
+    { _id: a._id },
+    { $set: { status: 'cancelled', cancelledAt: new Date(), cancelledBy: by, nextChargeAt: null } },
+  );
+  return myAutopay(userId);
+}
+
+/** Admin: stop the auto-renew that took this payment. */
+export async function cancelAutopayForPayment(paymentId: string, by: string) {
+  const p = await Payment.findById(paymentId).select('user subscriptionId').lean();
+  if (!p) throw notFound('Payment not found');
+  if (!p.subscriptionId) throw badRequest('This payment was not an auto-renew');
+  await cancelAutopay(String(p.user), by);
+  return getPayment(paymentId);
+}
+
+/** A debit failed and Razorpay will retry: keep the plan on for a few days. */
+async function giveGrace(a: AutopayLean) {
+  if (a.graceFrom) return;
+  const last = await Payment.findOne({ ...PLAN_ONLY, user: a.user, status: 'paid' })
+    .sort({ endsAt: -1 })
+    .select('endsAt');
+  if (!last?.endsAt) return;
+  const end = last.endsAt;
+  // Only near the end of the paid time; a later plan already covers anything else.
+  if (end.getTime() > Date.now() + AUTOPAY_GRACE_DAYS * DAY) return;
+  await Autopay.updateOne({ _id: a._id, graceFrom: null }, { $set: { graceFrom: end } });
+  last.endsAt = new Date(Math.max(end.getTime(), Date.now()) + AUTOPAY_GRACE_DAYS * DAY);
+  await last.save();
+  await syncPremium(a.user);
+  await syncPlanPerksFor(String(a.user));
+}
+
+async function tellUser(userId: Types.ObjectId, subject: string, lines: string[]) {
+  const user = await User.findById(userId).select('name email phone whatsappEnabled').lean();
+  if (!user) return;
+  const url = `${env.PUBLIC_SITE_URL}/dashboard/plans`;
+  void sendMail(user.email, subject, [`Hi ${user.name},`, ...lines], {
+    label: 'Open Plan & usage',
+    url,
+  });
+  if (user.whatsappEnabled !== false && user.phone)
+    void sendWhatsApp(user.phone, `${subject}. ${url}`);
+}
+
+const SUB_EVENTS: Record<string, AutopayStatus> = {
+  'subscription.authenticated': 'authenticated',
+  'subscription.activated': 'active',
+  'subscription.charged': 'active',
+  'subscription.resumed': 'active',
+  'subscription.pending': 'pending',
+  'subscription.halted': 'halted',
+  'subscription.cancelled': 'cancelled',
+  'subscription.completed': 'completed',
+};
+
+async function handleSubscriptionEvent(kind: string, body: RzpEvent): Promise<WebhookResult> {
+  const sub = body.payload?.subscription?.entity;
+  if (!sub?.id || !SUB_EVENTS[kind]) return 'ignored_event';
+  const a = await Autopay.findOne({ subscriptionId: sub.id }).lean<AutopayLean>();
+  if (!a) {
+    logger.warn(
+      { subscriptionId: sub.id, event: kind },
+      'Razorpay webhook for an unknown subscription',
+    );
+    return 'unknown_order';
+  }
+  const next =
+    sub.charge_at || sub.current_end
+      ? { nextChargeAt: fromUnix(sub.charge_at ?? sub.current_end) }
+      : {};
+  if (kind === 'subscription.charged') {
+    const pay = body.payload?.payment?.entity;
+    if (!pay?.id) return 'ignored_event';
+    return settleAutopayCharge(a, pay, sub);
+  }
+  const status = SUB_EVENTS[kind];
+  await setAutopayStatus(
+    a,
+    status,
+    status === 'cancelled' || status === 'completed' ? { nextChargeAt: null } : next,
+  );
+  if (kind === 'subscription.pending') {
+    await giveGrace(a);
+    await tellUser(a.user, 'Your NEXUS Estate auto-renew payment did not go through', [
+      `We could not take ₹${a.amount.toLocaleString('en-IN')} for your ${a.planSnapshot?.name ?? 'Premium'} plan. The bank will try again over the next few days.`,
+      `Your plan stays on for ${AUTOPAY_GRACE_DAYS} more days. Please keep money in the account or renew from Plan & usage.`,
+    ]);
+  }
+  if (kind === 'subscription.halted') {
+    await tellUser(a.user, 'Your NEXUS Estate auto-renew has stopped', [
+      'The bank could not take the payment after several tries, so auto-renew has stopped.',
+      'Renew from Plan & usage to keep your plan.',
+    ]);
+  }
+  return status === 'cancelled' || status === 'completed' ? 'already_done' : 'paid';
 }
 
 /* ---------------- Razorpay webhook ---------------- */
@@ -1160,7 +1637,11 @@ type RzpEntity = {
 };
 type RzpEvent = {
   event?: string;
-  payload?: { payment?: { entity?: RzpEntity }; order?: { entity?: RzpEntity } };
+  payload?: {
+    payment?: { entity?: RzpEntity & RzpPaymentEntity };
+    order?: { entity?: RzpEntity };
+    subscription?: { entity?: RzpSubscriptionEntity };
+  };
 };
 
 export type WebhookResult =
@@ -1174,10 +1655,11 @@ export type WebhookResult =
 /**
  * Safety net for online payments: if the visitor closes the tab before the site hears
  * back, Razorpay's payment.captured / order.paid still turns the plan or Featured on.
- * The caller has already checked the signature.
+ * subscription.* events run auto-renew. The caller has already checked the signature.
  */
 export async function handleRazorpayEvent(body: RzpEvent): Promise<WebhookResult> {
   const kind = body.event;
+  if (kind?.startsWith('subscription.')) return handleSubscriptionEvent(kind, body);
   if (kind !== 'payment.captured' && kind !== 'order.paid') return 'ignored_event';
   const pay = body.payload?.payment?.entity;
   const order = body.payload?.order?.entity;
@@ -1185,11 +1667,15 @@ export async function handleRazorpayEvent(body: RzpEvent): Promise<WebhookResult
   if (!orderId || !pay?.id) return 'ignored_event';
   if (pay.status && pay.status !== 'captured') return 'not_captured';
 
-  const p = await Payment.findOne({ orderId }).select('_id status amount method').lean();
+  const p = await Payment.findOne({ orderId })
+    .select('_id status amount method subscriptionId')
+    .lean();
   if (!p) {
     logger.warn({ orderId, event: kind }, 'Razorpay webhook for an unknown order');
     return 'unknown_order';
   }
+  // Auto-renew debits are booked by subscription.charged (it knows the grace days).
+  if (p.subscriptionId && p.status !== 'paid') return 'ignored_event';
   if (p.status === 'paid' || p.status === 'refunded') return 'already_done';
   const paise = pay.amount ?? order?.amount_paid;
   if (paise !== Math.round(p.amount * 100) || (pay.currency && pay.currency !== 'INR')) {
