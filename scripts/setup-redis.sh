@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time Redis install for the server. Run as root:  sudo bash scripts/setup-redis.sh
 # Redis listens on 127.0.0.1 only (not reachable from the internet), needs a password,
-# uses at most 200 MB of RAM and drops the least-recently-used keys when full.
+# uses at most 100 MB of RAM and drops the least-recently-used keys when full.
 # Prints the REDIS_URL to save as a GitHub secret (backend repo) at the end.
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo bash $0"; exit 1; }
@@ -24,7 +24,7 @@ bind 127.0.0.1 -::1
 protected-mode yes
 port 6379
 requirepass $PASS
-maxmemory 200mb
+maxmemory 100mb
 maxmemory-policy allkeys-lru
 save ""
 appendonly no
@@ -45,6 +45,6 @@ sleep 1
 REDISCLI_AUTH="$PASS" redis-cli ping
 
 echo
-echo "Redis is running (local only, 200 MB cap)."
+echo "Redis is running (local only, 100 MB cap)."
 echo "Save this as GitHub secret REDIS_URL in the nexus_backend repo, then re-run the Deploy workflow:"
 echo "redis://:$PASS@127.0.0.1:6379"
